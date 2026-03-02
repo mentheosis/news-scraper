@@ -462,7 +462,7 @@ function setSort(type) {
 
 function countCitations(text, articles) {
     const counts = {};
-    const regex = /\[(\d+(?:,\s*\d+)*)\]/g;
+    const regex = /\[(?:Article\s+)?(\d+(?:,\s*\d+)*)\]/gi;
     let match;
     while ((match = regex.exec(text)) !== null) {
         const nums = match[1].split(',').map(n => parseInt(n.trim()));
@@ -493,7 +493,7 @@ function scrollToSource(n) {
 }
 
 function linkifyCitations(container, articles) {
-    const citationRegex = /\[(\d+(?:,\s*\d+)*)\]/g;
+    const citationRegex = /\[(?:Article\s+)?(\d+(?:,\s*\d+)*)\]/gi;
 
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
     const textNodes = [];
@@ -648,7 +648,7 @@ function renderHeaderNav(markdown) {
     allHeaders.forEach((h, idx) => {
         headerCount++;
         const level = h.tagName.toLowerCase(); // 'h1', 'h2', 'h3'
-        const title = h.innerText.replace(/\[Article\s+[\d,\s]+\]/g, '').trim();
+        const title = h.innerText.replace(/\[(?:Article\s+)?[\d,\s]+\]/gi, '').trim();
 
         const li = document.createElement('li');
         li.className = `header-nav-item ${level}`;
