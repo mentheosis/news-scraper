@@ -1,9 +1,8 @@
 # AgNews Scraper
 
-Scrape and summaerize many news articles into concise digests
+Scrape and summarize many news articles into concise digests
 
 ![AgNews Interface](ag_news_scraper.png)
-
 
 ## Getting Started
 
