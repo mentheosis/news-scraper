@@ -100,7 +100,8 @@ async function fetchTopics(isRefresh = true) {
         if (!res.ok) throw new Error('Failed to fetch topics');
 
         const data = await res.json();
-        renderTopics(data.clusters);
+        window.allTopics = data.clusters;
+        renderTopics(window.allTopics);
         renderFeedHealth(data.feed_stats);
 
         loadingState.classList.add('hidden');
@@ -116,7 +117,7 @@ async function fetchTopics(isRefresh = true) {
     }
 }
 
-let lastSelectedTitle = null;
+let topicSelectionHistory = [];
 
 function renderTopics(topics) {
     const list = document.getElementById('topic-list');
@@ -130,11 +131,19 @@ function renderTopics(topics) {
     // Map with original index before sorting
     const enrichedTopics = topics.map((t, i) => ({ ...t, originalIndex: i }));
 
-    // Sort: Selected first, then Cached Digest, then the rest
+    // Sort: Selection History first (most recent at top), then Cached Digest, then the rest
     const sortedTopics = enrichedTopics.sort((a, b) => {
-        if (a.title === lastSelectedTitle) return -1;
-        if (b.title === lastSelectedTitle) return 1;
+        const indexA = topicSelectionHistory.indexOf(a.title);
+        const indexB = topicSelectionHistory.indexOf(b.title);
 
+        // If both are in history, sort by most recent (lower index in history array)
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        // If only A is in history, it comes first
+        if (indexA !== -1) return -1;
+        // If only B is in history, it comes first
+        if (indexB !== -1) return 1;
+
+        // Fallback for non-selected topics: Cached vs Non-cached
         if (a.has_cached_digest && !b.has_cached_digest) return -1;
         if (!a.has_cached_digest && b.has_cached_digest) return 1;
 
@@ -144,7 +153,9 @@ function renderTopics(topics) {
     sortedTopics.forEach((topic) => {
         const li = document.createElement('li');
         li.className = 'topic-card';
-        if (topic.title === lastSelectedTitle) li.classList.add('active');
+        // Active state should still highlight the current one
+        const currentTitle = topicSelectionHistory[0];
+        if (topic.title === currentTitle) li.classList.add('active');
 
         let sourcesHTML = '';
         if (topic.source_counts) {
@@ -169,8 +180,14 @@ function renderTopics(topics) {
         `;
 
         li.addEventListener('click', () => {
-            lastSelectedTitle = topic.title;
-            // Immediate re-render to move to top
+            // Update selection history: move clicked title to front
+            const histIdx = topicSelectionHistory.indexOf(topic.title);
+            if (histIdx !== -1) {
+                topicSelectionHistory.splice(histIdx, 1);
+            }
+            topicSelectionHistory.unshift(topic.title);
+
+            // Immediate re-render to move to top and preserve history order
             renderTopics(topics);
             generateDigest(topic.originalIndex, topic.title);
         });
@@ -191,9 +208,33 @@ async function generateDigest(topicIdx, title) {
     emptyState.classList.add('hidden');
     digestView.classList.add('hidden');
 
+    // Auto-open Navigation Sidebar
+    const navSidebar = document.getElementById('headers-sidebar');
+    if (navSidebar && navSidebar.classList.contains('collapsed')) {
+        navSidebar.classList.remove('collapsed');
+        const btnH = document.getElementById('btn-show-headers');
+        if (btnH) btnH.classList.add('active');
+    }
+
     // Reset sidebars/panels
     loadingState.classList.remove('hidden');
     contentBox.innerHTML = '';
+
+    // Clear Navigation Panel
+    const navList = document.getElementById('header-nav-list');
+    if (navList) {
+        navList.innerHTML = '<div class="empty-nav-msg">Generating navigation...</div>';
+    }
+
+    // Clear Sources Panel
+    const sourceList = document.getElementById('source-list-panel');
+    if (sourceList) {
+        sourceList.innerHTML = '<li class="empty-list">Loading source articles...</li>';
+    }
+    const sourceCount = document.getElementById('source-count');
+    if (sourceCount) {
+        sourceCount.innerText = '0 articles processed';
+    }
 
     document.getElementById('loading-status-text').innerText = `Preparing sources for: ${title}...`;
     document.getElementById('progress-step').innerText = "Initializing...";
@@ -280,6 +321,12 @@ async function generateDigest(topicIdx, title) {
                             }
 
                             bindCitationLinks(data.articles);
+                        }
+
+                        // Update cache state in UI without refresh
+                        if (window.allTopics && window.allTopics[topicIdx]) {
+                            window.allTopics[topicIdx].has_cached_digest = true;
+                            renderTopics(window.allTopics);
                         }
                     }
                 }
