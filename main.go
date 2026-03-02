@@ -25,6 +25,7 @@ func main() {
 	// 1. API Endpoints
 	mux.HandleFunc("/api/topics", appState.HandleGetTopics)
 	mux.HandleFunc("/api/digest", appState.HandleGenerateDigest)
+	mux.HandleFunc("/api/dates", appState.HandleListDates)
 
 	// 2. Serve static files (HTML, CSS, JS)
 	fs := http.FileServer(http.Dir("./static"))

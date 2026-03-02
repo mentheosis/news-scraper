@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+    fetchDates();
     fetchTopics(false); // Initial load: try cache first
 
     // -- Mini Strip Navigation --
@@ -32,7 +33,34 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('refresh-btn').addEventListener('click', () => {
-        fetchTopics(true); // Explicit refresh: fetch new
+        // Refresh always targets "Today"
+        const dateSelect = document.getElementById('news-date-select');
+        const today = new Date().toISOString().split('T')[0];
+
+        // If we are on another day, switch to today and refresh
+        if (dateSelect.value !== today) {
+            // Check if today is in the list, if not add it temporarily
+            let found = false;
+            for (let opt of dateSelect.options) {
+                if (opt.value === today) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                const opt = document.createElement('option');
+                opt.value = today;
+                opt.innerText = today + " (Today)";
+                dateSelect.prepend(opt);
+            }
+            dateSelect.value = today;
+        }
+
+        fetchTopics(true, today);
+    });
+
+    document.getElementById('news-date-select').addEventListener('change', (e) => {
+        fetchTopics(false, e.target.value);
     });
 
     document.getElementById('sort-num-btn').addEventListener('click', () => {
@@ -43,6 +71,57 @@ document.addEventListener('DOMContentLoaded', () => {
         setSort('citations');
     });
 });
+
+async function fetchDates() {
+    try {
+        const res = await fetch('/api/dates');
+        const data = await res.json();
+        const select = document.getElementById('news-date-select');
+        const today = new Date().toISOString().split('T')[0];
+
+        select.innerHTML = '';
+
+        // Ensure today is always an option at the top if not already in cache
+        if (!data.dates.includes(today)) {
+            const opt = document.createElement('option');
+            opt.value = today;
+            opt.innerText = today + " (Today)";
+            select.appendChild(opt);
+        }
+
+        data.dates.forEach(date => {
+            const opt = document.createElement('option');
+            opt.value = date;
+            opt.innerText = date + (date === today ? " (Today)" : "");
+            // Avoid duplicate today
+            if (date === today) {
+                select.innerHTML = ''; // Start over and let the loop handle it
+            }
+        });
+
+        // Re-do the loop properly to avoid logic mess
+        select.innerHTML = '';
+        const allDates = [...data.dates];
+        if (!allDates.includes(today)) allDates.unshift(today);
+        else {
+            // Ensure today is first if it was in the middle
+            const idx = allDates.indexOf(today);
+            allDates.splice(idx, 1);
+            allDates.unshift(today);
+        }
+
+        allDates.forEach(date => {
+            const opt = document.createElement('option');
+            opt.value = date;
+            opt.innerText = date + (date === today ? " (Today)" : "");
+            select.appendChild(opt);
+        });
+
+        select.value = today;
+    } catch (err) {
+        console.error("Failed to fetch dates:", err);
+    }
+}
 
 function toggleSidebar(sidebarId, btnId) {
     const sidebar = document.getElementById(sidebarId);
@@ -66,52 +145,111 @@ let currentArticles = [];
 let currentCitations = {};
 let currentSort = 'number';
 
-async function fetchTopics(isRefresh = true) {
+async function fetchTopics(isRefresh = true, targetDate = '') {
     const topicList = document.getElementById('topic-list');
     const loadingState = document.getElementById('loading-topics');
     const errorState = document.getElementById('error-topics');
     const statusText = document.getElementById('status-text-topics');
+    const topicsHeader = document.querySelector('.topics-header');
+
+    const today = new Date().toISOString().split('T')[0];
+    if (!targetDate) {
+        targetDate = document.getElementById('news-date-select').value || today;
+    }
+
+    // Hide depth/refresh for past dates
+    if (topicsHeader) {
+        if (targetDate !== today) {
+            topicsHeader.classList.add('hidden');
+        } else {
+            topicsHeader.classList.remove('hidden');
+        }
+    }
 
     topicList.classList.add('hidden');
     errorState.classList.add('hidden');
     loadingState.classList.remove('hidden');
 
     if (!isRefresh) {
-        statusText.innerText = "Loading cached topics...";
+        statusText.innerText = `Loading reports for ${targetDate}...`;
     } else {
         statusText.innerText = "Clustering latest headlines...";
     }
 
     try {
         const limitVal = document.getElementById('feed-limit').value || 25;
-        const res = await fetch(`/api/topics?limit=${limitVal}&refresh=${isRefresh}`);
+        const res = await fetch(`/api/topics?limit=${limitVal}&refresh=${isRefresh}&date=${targetDate}`);
 
         if (res.status === 429) {
-            const data = await res.json();
-            if (data.feed_stats) {
-                renderFeedHealth(data.feed_stats);
-                closeSidebar('sidebar', 'btn-show-topics');
-                toggleSidebar('secondary-sidebar', 'btn-show-health');
-            }
+            const data = await res.json().catch(() => ({}));
             handleTopicsRateLimit(data.retry_after);
             return;
         }
 
-        if (!res.ok) throw new Error('Failed to fetch topics');
+        if (!res.ok) throw new Error(`Server error: ${res.status} ${res.statusText}`);
 
-        const data = await res.json();
-        window.allTopics = data.clusters;
-        renderTopics(window.allTopics);
-        renderFeedHealth(data.feed_stats);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-        loadingState.classList.add('hidden');
-        topicList.classList.remove('hidden');
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split('\n\n');
+            buffer = events.pop();
+
+            for (const rawEvent of events) {
+                if (!rawEvent.trim()) continue;
+
+                const lines = rawEvent.split(/\r?\n/);
+                let eventType = 'message';
+                let dataStr = '';
+
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine.startsWith('event: ')) {
+                        eventType = trimmedLine.replace('event: ', '').trim();
+                    } else if (trimmedLine.startsWith('data: ')) {
+                        dataStr = trimmedLine.replace('data: ', '').trim();
+                    }
+                }
+
+                if (dataStr) {
+                    try {
+                        const data = JSON.parse(dataStr);
+                        if (eventType === 'progress') {
+                            statusText.innerText = data.message;
+                        } else if (eventType === 'error') {
+                            if (data.error === "API Rate Limited") {
+                                handleTopicsRateLimit(data.retry_after);
+                            } else {
+                                throw new Error(data.message || "Failed to load topics");
+                            }
+                            return;
+                        } else if (eventType === 'result') {
+                            window.allTopics = data.clusters;
+                            renderTopics(window.allTopics);
+                            renderFeedHealth(data.feed_stats);
+
+                            loadingState.classList.add('hidden');
+                            topicList.classList.remove('hidden');
+                        }
+                    } catch (parseErr) {
+                        console.error("SSE Parse Error:", parseErr, "Raw Event:", rawEvent, "Extracted DataStr:", dataStr);
+                        throw parseErr;
+                    }
+                }
+            }
+        }
     } catch (err) {
-        console.error(err);
+        console.error("fetchTopics error:", err);
         loadingState.classList.add('hidden');
         errorState.classList.remove('hidden');
         errorState.innerHTML = `
-            <p>Failed to load topics.</p>
+            <p style="color:var(--status-err); font-weight:bold;">Failed to load topics</p>
+            <p style="font-size:12px; margin-bottom:10px;">${err.message}</p>
             <button class="retry-btn" onclick="fetchTopics(true)">Try Again</button>
         `;
     }
@@ -462,12 +600,16 @@ function setSort(type) {
 
 function countCitations(text, articles) {
     const counts = {};
-    const regex = /\[(?:Article\s+)?(\d+(?:,\s*\d+)*)\]/gi;
+    const bracketRegex = /\[([^\]]+)\]/g;
     let match;
-    while ((match = regex.exec(text)) !== null) {
-        const nums = match[1].split(',').map(n => parseInt(n.trim()));
+    while ((match = bracketRegex.exec(text)) !== null) {
+        const content = match[1];
+        // Only process if it looks like a citation (contains "Article" or only digits/commas/spaces)
+        if (!/article/i.test(content) && !/^[\d\s,]+$/.test(content)) continue;
+
+        const nums = (content.match(/\d+/g) || []).map(n => parseInt(n));
         nums.forEach(n => {
-            if (!isNaN(n)) {
+            if (!isNaN(n) && n >= 1 && n <= (articles ? articles.length : 999)) {
                 counts[n] = (counts[n] || 0) + 1;
             }
         });
@@ -493,14 +635,14 @@ function scrollToSource(n) {
 }
 
 function linkifyCitations(container, articles) {
-    const citationRegex = /\[(?:Article\s+)?(\d+(?:,\s*\d+)*)\]/gi;
+    const bracketRegex = /\[([^\]]+)\]/g;
 
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
     const textNodes = [];
     let node;
     while ((node = walker.nextNode())) {
-        if (citationRegex.test(node.textContent)) textNodes.push(node);
-        citationRegex.lastIndex = 0;
+        if (bracketRegex.test(node.textContent)) textNodes.push(node);
+        bracketRegex.lastIndex = 0;
     }
 
     textNodes.forEach(textNode => {
@@ -508,15 +650,21 @@ function linkifyCitations(container, articles) {
         const text = textNode.textContent;
         const fragment = document.createDocumentFragment();
         let lastIndex = 0;
-        citationRegex.lastIndex = 0;
+        bracketRegex.lastIndex = 0;
         let match;
 
-        while ((match = citationRegex.exec(text)) !== null) {
+        while ((match = bracketRegex.exec(text)) !== null) {
+            const content = match[1];
+            // Only process if it looks like a citation (contains "Article" or only digits/commas/spaces)
+            if (!/article/i.test(content) && !/^[\d\s,]+$/.test(content)) {
+                continue;
+            }
+
             if (match.index > lastIndex) {
                 fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
             }
 
-            const nums = match[1].split(',').map(n => parseInt(n.trim())).filter(n => n >= 1 && n <= articles.length);
+            const nums = (content.match(/\d+/g) || []).map(n => parseInt(n)).filter(n => n >= 1 && n <= articles.length);
 
             if (nums.length === 0) {
                 fragment.appendChild(document.createTextNode(match[0]));

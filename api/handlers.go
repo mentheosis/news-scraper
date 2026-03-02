@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kdub/ag_news/ingest"
 	"github.com/kdub/ag_news/services"
@@ -50,9 +51,46 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 	}
 	refresh := r.URL.Query().Get("refresh") != "false"
 
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		log.Println("Streaming not supported for topics")
+	}
+
+	sendProgress := func(message string) {
+		event := map[string]interface{}{
+			"type":    "status",
+			"message": message,
+		}
+		data, _ := json.Marshal(event)
+		fmt.Fprintf(w, "event: progress\ndata: %s\n\n", data)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	sendError := func(message string) {
+		fmt.Fprintf(w, "event: error\ndata: {\"message\": %q}\n\n", message)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	today := time.Now().Format("2006-01-02")
+	targetDate := r.URL.Query().Get("date")
+	if targetDate == "" {
+		targetDate = today
+	}
+
 	// 1. If not refreshing, try to load from cache immediately
 	if !refresh {
-		clusters, err := services.LoadClustersCache()
+		sendProgress(fmt.Sprintf("Checking cache for %s...", targetDate))
+		clusters, err := services.LoadClustersCache(targetDate)
 		if err == nil && len(clusters) > 0 {
 			log.Printf("Loading topics from cache (refresh=false)...\n")
 			// Reconstruct basic feed stats from cached data
@@ -78,34 +116,33 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 			app.Clusters = clusters
 			app.FeedStats = feedStats
 
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(TopicsResponse{
+			resp := TopicsResponse{
 				Clusters:  clusters,
 				FeedStats: feedStats,
-			})
+			}
+			data, _ := json.Marshal(resp)
+			fmt.Fprintf(w, "event: result\ndata: %s\n\n", data)
 			return
 		}
-		log.Println("No cache found or error loading cache, proceeding to fetch...")
+		sendProgress("No cache found, fetching live feeds...")
 	}
 
 	// 1. Fetch RSS items
-	log.Printf("Fetching feeds with limit %d...\n", limit)
+	sendProgress(fmt.Sprintf("Fetching latest news from %d feeds...", len(app.Feeds)))
 	summaries, feedStats := ingest.FetchFeeds(ctx, app.Feeds, limit)
 
 	if len(summaries) == 0 {
-		http.Error(w, `{"error": "No articles found"}`, http.StatusInternalServerError)
+		sendError("No articles found in any feeds")
 		return
 	}
 
-	// Load Cache
-	existingClusters, err := services.LoadClustersCache()
+	// Load Cache for clustering context
+	existingClusters, err := services.LoadClustersCache(targetDate)
 	if err != nil {
-		log.Printf("Could not load cache: %v", err)
 		existingClusters = []*services.TopicCluster{}
 	}
 
 	// Initialize feedStats with all known sources from app.Feeds
-	// This ensures even sources that failed to fetch show up in the health panel.
 	feedStatsFull := make(map[string]ingest.FeedStatus)
 	for _, f := range app.Feeds {
 		if s, ok := feedStats[f.Name]; ok {
@@ -118,13 +155,11 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Identify new articles and populate cached counts from existing data
+	// Identify new articles and populate cached counts
 	existingLinks := make(map[string]bool)
 	for _, c := range existingClusters {
 		for _, a := range c.Articles {
 			existingLinks[a.Link] = true
-
-			// Match source name case-insensitively
 			for name, stat := range feedStatsFull {
 				if strings.EqualFold(name, a.SourceName) {
 					stat.CachedCount++
@@ -137,7 +172,6 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 
 	var newArticles []ingest.ArticleSummary
 	for _, a := range summaries {
-		// Identify which source this belongs to (case-insensitively)
 		var matchedName string
 		for name := range feedStatsFull {
 			if strings.EqualFold(name, a.SourceName) {
@@ -156,31 +190,23 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Update feedStats for the response
 	feedStats = feedStatsFull
 
 	// 2. Cluster
-	log.Printf("Clustering %d new articles into %d existing...", len(newArticles), len(existingClusters))
+	sendProgress(fmt.Sprintf("Clustering %d news articles into topics...", len(newArticles)+len(existingLinks)))
 	clusters, err := services.ClusterTopics(ctx, existingClusters, newArticles)
 	if err != nil {
 		log.Printf("Clustering failed: %v", err)
 		if isLimit, wait := services.IsRateLimitError(err); isLimit {
-			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error":       "API Rate Limited",
-				"retry_after": wait,
-				"feed_stats":  feedStats,
-			})
+			fmt.Fprintf(w, "event: error\ndata: {\"error\": \"API Rate Limited\", \"retry_after\": %d}\n\n", wait)
 			return
 		}
-		http.Error(w, `{"error": "Failed to cluster topics"}`, http.StatusInternalServerError)
+		sendError("Failed to cluster topics")
 		return
 	}
 
 	// Save Cache
-	log.Printf("Saving %d clusters to disk cache...", len(clusters))
-
-	// Check for cached digests for the UI
+	sendProgress("Finalizing and saving clusters...")
 	for _, c := range clusters {
 		compArticles := make([]services.CompressedArticle, len(c.Articles))
 		for i, a := range c.Articles {
@@ -189,11 +215,10 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 		c.HasCachedDigest = services.IsDigestCached(compArticles)
 	}
 
-	if err := services.SaveClustersCache(clusters); err != nil {
+	if err := services.SaveClustersCache(targetDate, clusters); err != nil {
 		log.Printf("Failed to save cluster cache: %v", err)
 	}
 
-	// Save to memory so the frontend can retrieve them later
 	app.Clusters = clusters
 	app.FeedStats = feedStats
 
@@ -201,9 +226,15 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 		Clusters:  clusters,
 		FeedStats: feedStats,
 	}
+	data, _ := json.Marshal(resp)
+	fmt.Fprintf(w, "event: result\ndata: %s\n\n", data)
+}
 
+// HandleListDates returns the available cached news dates
+func (app *AppState) HandleListDates(w http.ResponseWriter, r *http.Request) {
+	dates := services.ListCacheDates()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(map[string]interface{}{"dates": dates})
 }
 
 // HandleGenerateDigest takes a topic ID (index), scrapes its articles, and runs the Gemini summarization.
@@ -332,9 +363,38 @@ func (app *AppState) HandleGenerateDigest(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 3. Generate digest using compressed facts
+	// 3. Generate digest (with yesterday's context if available)
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	var previousDigest string
+
+	yesterdayClusters, err := services.LoadClustersCache(yesterday)
+	if err == nil {
+		foundMatch := false
+		for _, yc := range yesterdayClusters {
+			// Try exact-ish match (EqualFold handles case)
+			if strings.EqualFold(yc.Title, selectedCluster.Title) {
+				// Match! Try to load its digest
+				prevLinks := make([]string, len(yc.Articles))
+				for i, a := range yc.Articles {
+					prevLinks[i] = a.Link
+				}
+				if content, exists := services.GetCachedDigest(prevLinks); exists {
+					log.Printf("[Deltas] Found yesterday's digest for '%s', providing as context.", selectedCluster.Title)
+					previousDigest = content
+				}
+				foundMatch = true
+				break
+			}
+		}
+		if !foundMatch {
+			log.Printf("[Deltas] No title match found yesterday for today's topic '%s'. (Found %d topics yesterday)", selectedCluster.Title, len(yesterdayClusters))
+		}
+	} else {
+		log.Printf("[Deltas] No yesterday cache found for %s", yesterday)
+	}
+
 	sendProgress(3, "Synthesizing final digest with Gemini...")
-	digest, err := services.GenerateDigest(ctx, compressedArticles)
+	digest, err := services.GenerateDigest(ctx, compressedArticles, previousDigest)
 	if err != nil {
 		log.Printf("Digest generation failed: %v", err)
 		if isLimit, wait := services.IsRateLimitError(err); isLimit {

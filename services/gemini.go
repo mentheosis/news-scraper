@@ -68,7 +68,7 @@ func GetCachedDigest(links []string) (string, bool) {
 
 // GenerateDigest takes a list of compressed article facts
 // and returns a synthesized Markdown digest using Gemini.
-func GenerateDigest(ctx context.Context, articles []CompressedArticle) (string, error) {
+func GenerateDigest(ctx context.Context, articles []CompressedArticle, previousDigest string) (string, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return "", fmt.Errorf("GEMINI_API_KEY environment variable is not set")
@@ -81,18 +81,23 @@ func GenerateDigest(ctx context.Context, articles []CompressedArticle) (string, 
 		return "", fmt.Errorf("failed to create genai client: %w", err)
 	}
 
+	// 0. Log match status
+	if previousDigest != "" {
+		log.Printf("[Gemini] Previous context found for '%s' (%d chars). Check cache next.\n", articles[0].Title, len(previousDigest))
+	}
+
+	// 1. Check Digest Cache
 	digestHash := getDigestHash(articles)
 	cachePath := filepath.Join(getDigestCacheDir(), digestHash+".md")
-
-	// Check Digest Cache
 	cachedData, err := os.ReadFile(cachePath)
 	if err == nil {
-		log.Println("Serving digest from cache!")
+		log.Printf("[Gemini] Serving digest for '%s' from cache.\n", articles[0].Title)
 		return string(cachedData), nil
 	}
 
-	// 1. Build the prompt with all the compressed articles
-	promptText := buildPrompt(articles)
+	// 2. Build the prompt with all the compressed articles
+	log.Printf("[Gemini] Cache miss. Generating NEW digest for '%s'...\n", articles[0].Title)
+	promptText := buildPrompt(articles, previousDigest)
 
 	// In a fully robust system, we would:
 	// 1. Ask Gemini to extract key *events* from the articles.
@@ -121,8 +126,17 @@ func GenerateDigest(ctx context.Context, articles []CompressedArticle) (string, 
 	return finalText, nil
 }
 
-func buildPrompt(articles []CompressedArticle) string {
+func buildPrompt(articles []CompressedArticle, previousDigest string) string {
 	promptText := "You are a professional news digester. I will provide you with a list of extracted facts from several recent news articles covering a SINGLE major event or topic. Your job is to create a well-structured, comprehensive Markdown digest of this particular event based on the given facts.\n\n"
+
+	if previousDigest != "" {
+		promptText += "### PREVIOUS DAY'S SUMMARY DATA ###\n"
+		promptText += previousDigest + "\n\n"
+		promptText += "CRITICAL TASK: Your primary goal is to perform a DELTA ANALYSIS. Compare the new facts provided below with the previous day's summary above.\n"
+		promptText += "YOU MUST START YOUR RESPONSE WITH A SECTION HEADED '## WHAT'S NEW TODAY'.\n"
+		promptText += "In this section, explicitly list specific new facts, escalations, or changes that were NOT in the previous summary. If there are no major changes, highlight even the minor updates or confirmations of previous trends.\n\n"
+	}
+
 	promptText += "Formatting & Hierarchy Guidelines:\n"
 	promptText += "- Use Markdown headers (## and ###) to logically divide the digest into clear sections (e.g., 'Overview', 'Key Developments', 'Impact', 'Background').\n"
 	promptText += "- Use bulleted lists appropriately to highlight lists of facts, figures, or key takeaways. Do not just write a flat block of text.\n"
