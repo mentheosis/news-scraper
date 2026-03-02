@@ -2,16 +2,40 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
-	"github.com/kdub/ag_news/ingest"
 	"google.golang.org/genai"
 )
 
-// GenerateDigest takes a list of ingested articles, crosses them with Wikipedia context
-// (by asking the model first what to query, or passing it directly), and returns a Markdown digest.
-func GenerateDigest(ctx context.Context, articles []ingest.ArticleContent) (string, error) {
+func getDigestCacheDir() string {
+	dir := filepath.Join(".", ".cache", "digests")
+	os.MkdirAll(dir, 0755)
+	return dir
+}
+
+func getDigestHash(articles []CompressedArticle) string {
+	hashes := make([]string, len(articles))
+	for i, a := range articles {
+		h := sha256.Sum256([]byte(a.Link))
+		hashes[i] = hex.EncodeToString(h[:])
+	}
+	sort.Strings(hashes)
+
+	combined := strings.Join(hashes, "")
+	finalHash := sha256.Sum256([]byte(combined))
+	return hex.EncodeToString(finalHash[:])
+}
+
+// GenerateDigest takes a list of compressed article facts
+// and returns a synthesized Markdown digest using Gemini.
+func GenerateDigest(ctx context.Context, articles []CompressedArticle) (string, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return "", fmt.Errorf("GEMINI_API_KEY environment variable is not set")
@@ -24,7 +48,17 @@ func GenerateDigest(ctx context.Context, articles []ingest.ArticleContent) (stri
 		return "", fmt.Errorf("failed to create genai client: %w", err)
 	}
 
-	// 1. Build the prompt with all the articles
+	digestHash := getDigestHash(articles)
+	cachePath := filepath.Join(getDigestCacheDir(), digestHash+".md")
+
+	// Check Digest Cache
+	cachedData, err := os.ReadFile(cachePath)
+	if err == nil {
+		log.Println("Serving digest from cache!")
+		return string(cachedData), nil
+	}
+
+	// 1. Build the prompt with all the compressed articles
 	promptText := buildPrompt(articles)
 
 	// In a fully robust system, we would:
@@ -44,26 +78,34 @@ func GenerateDigest(ctx context.Context, articles []ingest.ArticleContent) (stri
 	}
 
 	part := resp.Candidates[0].Content.Parts[0]
-	return part.Text, nil
-}
+	finalText := part.Text
 
-func buildPrompt(articles []ingest.ArticleContent) string {
-	prompt := "You are a professional news digester. I will provide you with several recent news articles from various sources. Your job is to create a concise, well-structured Markdown digest of the current events.\n\n"
-	prompt += "Guidelines:\n"
-	prompt += "- Group related articles into single thematic sections (e.g., 'Global Politics', 'Markets', 'Technology').\n"
-	prompt += "- Provide a 2-3 sentence summary of the event.\n"
-	prompt += "- YOU MUST CITE YOUR SOURCES. Always include inline links to the original article URLs provided.\n"
-	prompt += "- Do NOT hallucinate information not present in the articles.\n\n"
-
-	prompt += "Here are the articles:\n\n"
-
-	for i, a := range articles {
-		prompt += fmt.Sprintf("--- Article %d ---\n", i+1)
-		prompt += fmt.Sprintf("Source: %s\n", a.SourceName)
-		prompt += fmt.Sprintf("Title: %s\n", a.Title)
-		prompt += fmt.Sprintf("URL: %s\n", a.Link)
-		prompt += fmt.Sprintf("Content:\n%s\n\n", a.FullText)
+	// Save to Digest Cache
+	if err := os.WriteFile(cachePath, []byte(finalText), 0644); err != nil {
+		log.Printf("Failed to cache digest: %v", err)
 	}
 
-	return prompt
+	return finalText, nil
+}
+
+func buildPrompt(articles []CompressedArticle) string {
+	promptText := "You are a professional news digester. I will provide you with a list of extracted facts from several recent news articles covering a SINGLE major event or topic. Your job is to create a well-structured, comprehensive Markdown digest of this particular event based on the given facts.\n\n"
+	promptText += "Formatting & Hierarchy Guidelines:\n"
+	promptText += "- Use Markdown headers (## and ###) to logically divide the digest into clear sections (e.g., 'Overview', 'Key Developments', 'Impact', 'Background').\n"
+	promptText += "- Use bulleted lists appropriately to highlight lists of facts, figures, or key takeaways. Do not just write a flat block of text.\n"
+	promptText += "- Provide a cohesive summary of the event as it unfolded across the articles.\n"
+	promptText += "- YOU MUST CITE YOUR SOURCES inline. Use markdown links to the original article URLs provided when citing facts, e.g., 'According to [Article 2](https://...), ...'.\n"
+	promptText += "- Do NOT hallucinate information not present in the articles.\n\n"
+
+	promptText += "Here are the articles covering this topic:\n\n"
+
+	for i, a := range articles {
+		promptText += fmt.Sprintf("--- Article %d ---\n", i+1)
+		promptText += fmt.Sprintf("Source: %s\n", a.SourceName)
+		promptText += fmt.Sprintf("Title: %s\n", a.Title)
+		promptText += fmt.Sprintf("URL: %s\n", a.Link)
+		promptText += fmt.Sprintf("Extracted Facts:\n%s\n\n", a.Summary)
+	}
+
+	return promptText
 }

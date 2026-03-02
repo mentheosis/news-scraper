@@ -19,12 +19,23 @@ type ArticleSummary struct {
 	Published  *time.Time
 }
 
+// FeedStatus represents the health and extraction count for a specific feed source.
+type FeedStatus struct {
+	Name         string `json:"name"`
+	URL          string `json:"url"`
+	ArticleCount int    `json:"article_count"` // total fetched this run
+	NewCount     int    `json:"new_count"`     // brand new to the system
+	CachedCount  int    `json:"cached_count"`  // already existed in clusters
+	Error        string `json:"error,omitempty"`
+}
+
 // FetchFeeds grabs the latest items from all provided feeds concurrently.
 // It limits to the top maxItemsPerFeed items.
-func FetchFeeds(ctx context.Context, feeds []FeedSource, maxItemsPerFeed int) []ArticleSummary {
+func FetchFeeds(ctx context.Context, feeds []FeedSource, maxItemsPerFeed int) ([]ArticleSummary, map[string]FeedStatus) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var allArticles []ArticleSummary
+	feedStats := make(map[string]FeedStatus)
 
 	fp := gofeed.NewParser()
 
@@ -33,10 +44,20 @@ func FetchFeeds(ctx context.Context, feeds []FeedSource, maxItemsPerFeed int) []
 		go func(f FeedSource) {
 			defer wg.Done()
 
+			status := FeedStatus{
+				Name: f.Name,
+				URL:  f.URL,
+			}
+
 			// Parse URL with context to allow cancellation/timeouts
 			feedData, err := fp.ParseURLWithContext(f.URL, ctx)
 			if err != nil {
 				log.Printf("Error parsing feed %s (%s): %v", f.Name, f.URL, err)
+				status.Error = err.Error()
+
+				mu.Lock()
+				feedStats[f.Name] = status
+				mu.Unlock()
 				return
 			}
 
@@ -56,8 +77,11 @@ func FetchFeeds(ctx context.Context, feeds []FeedSource, maxItemsPerFeed int) []
 				sourceArticles = append(sourceArticles, art)
 			}
 
+			status.ArticleCount = len(sourceArticles)
+
 			mu.Lock()
 			allArticles = append(allArticles, sourceArticles...)
+			feedStats[f.Name] = status
 			mu.Unlock()
 
 		}(feed)
@@ -65,5 +89,5 @@ func FetchFeeds(ctx context.Context, feeds []FeedSource, maxItemsPerFeed int) []
 
 	wg.Wait()
 	fmt.Printf("Fetched %d articles across %d sources\n", len(allArticles), len(feeds))
-	return allArticles
+	return allArticles, feedStats
 }

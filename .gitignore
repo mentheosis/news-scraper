@@ -9,3 +9,6 @@ go.work.sum
 ag_news
 build_output.log
 digest.md
+
+# Application Caches
+.cache/

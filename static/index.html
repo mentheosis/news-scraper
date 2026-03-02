@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgNews | AI Digester</title>
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <script src="app.js" defer></script>
+</head>
+
+<body class="theme-dark">
+
+    <div class="app-container">
+        <!-- Sidebar: Topics -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">📰</span>
+                    <span class="logo-text">AgNews</span>
+                </div>
+                <div class="limit-setting">
+                    <label for="feed-limit">Depth:</label>
+                    <input type="number" id="feed-limit" value="25" min="1" max="50" class="input-limit">
+                </div>
+            </div>
+
+            <div class="topics-container">
+                <div class="topics-header">
+                    <h3>Today's Top Events</h3>
+                    <button id="refresh-btn" class="icon-btn" title="Refresh Topics">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2"
+                            fill="none" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <div id="loading-topics" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Clustering latest headlines...</p>
+                </div>
+
+                <ul id="topic-list" class="topic-list hidden">
+                    <!-- Topics injected by JS -->
+                </ul>
+
+                <div id="error-topics" class="error-state hidden">
+                    <p>Failed to load topics.</p>
+                    <button class="retry-btn" onclick="fetchTopics()">Try Again</button>
+                </div>
+            </div>
+
+            <button id="toggle-health-btn" class="toggle-health-btn" title="Toggle Feed Health">
+                📊 Feed Health <span id="health-caret">▼</span>
+            </button>
+        </aside>
+
+        <!-- Secondary Sidebar: Feed Health -->
+        <aside class="secondary-sidebar collapsed" id="secondary-sidebar">
+            <div id="feed-health-panel" class="sidebar-panel">
+                <div class="sidebar-header">
+                    <h3>Feed Health Overview</h3>
+                    <p class="subtitle">Live extraction metrics</p>
+                </div>
+                <div class="sources-container">
+                    <ul id="feed-health-list" class="source-list-panel">
+                        <!-- Health cards injected by JS -->
+                    </ul>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area: Digest -->
+        <main class="main-content">
+            <!-- Empty State -->
+            <div id="empty-state" class="empty-state">
+                <div class="welcome-icon">⚡</div>
+                <h2>Select a topic to generate a digest</h2>
+                <p>AgNews uses Google Gemini to read full articles from sources like AP, Reuters, and NYT to synthesize
+                    a concise, cited summary of the event.</p>
+            </div>
+
+            <!-- Loading State for Digest -->
+            <div id="loading-digest" class="loading-state hidden">
+                <div class="pulse-ring"></div>
+                <h2>Synthesizing Digest...</h2>
+                <p class="loading-meta" id="loading-digest-topic">Scraping full article text across sources</p>
+            </div>
+
+            <!-- Completed Digest View -->
+            <div id="digest-view" class="digest-view hidden">
+                <header class="digest-header">
+                    <h1 id="digest-title">Topic Title</h1>
+                </header>
+                <div id="digest-content" class="markdown-body">
+                    <!-- Markdown injected by JS -->
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Sidebar: Sources -->
+        <aside class="right-sidebar hidden" id="right-sidebar">
+            <div id="digest-sources-panel" class="sidebar-panel">
+                <div class="sidebar-header">
+                    <h3>Source Articles</h3>
+                    <p class="subtitle" id="source-count">0 articles processed</p>
+                    <div class="sort-controls">
+                        <button id="sort-num-btn" class="sort-btn active" title="Sort by Index">Index</button>
+                        <button id="sort-cite-btn" class="sort-btn" title="Sort by Citations">Citations</button>
+                    </div>
+                </div>
+                <div class="sources-container">
+                    <ul id="source-list-panel" class="source-list-panel">
+                        <!-- Source cards injected by JS -->
+                    </ul>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+</body>
+
+</html>
