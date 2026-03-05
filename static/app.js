@@ -377,8 +377,9 @@ async function generateDigest(topicIdx, title) {
     document.getElementById('loading-status-text').innerText = `Preparing sources for: ${title}...`;
     document.getElementById('progress-step').innerText = "Initializing...";
 
+    const targetDate = document.getElementById('news-date-select').value || new Date().toISOString().split('T')[0];
     try {
-        const response = await fetch(`/api/digest?topicId=${topicIdx}`, { method: 'POST' });
+        const response = await fetch(`/api/digest?topicId=${topicIdx}&date=${targetDate}`, { method: 'POST' });
 
         if (!response.ok) {
             const errBody = await response.json().catch(() => ({}));
@@ -423,6 +424,16 @@ async function generateDigest(topicIdx, title) {
                     } else if (eventType === 'error') {
                         if (data.error === "API Rate Limited") {
                             handleDigestRateLimit(data.retry_after, () => generateDigest(topicIdx, title));
+                        } else if (data.error === "API Overloaded") {
+                            loadingState.classList.add('hidden');
+                            digestView.classList.remove('hidden');
+                            contentBox.innerHTML = `
+                                <div class="error-state">
+                                    <p style="color:var(--status-warn); font-weight:bold; font-size:16px;">${data.message}</p>
+                                    <button class="retry-btn" style="margin-top:20px;" onclick="generateDigest(${topicIdx}, '${title.replace(/'/g, "\\'")}')">Try Synthesis Again</button>
+                                </div>
+                            `;
+                            document.getElementById('loading-status-text').innerText = "Gemini is busy";
                         } else {
                             throw new Error(data.message || "Failed to generate digest");
                         }
@@ -547,9 +558,9 @@ function renderSourceArticles(skippedArticles = []) {
     }
 
     // Determine how many were actually scraped vs skipped
-    const normalizeUrl = (u) => u.split('?')[0].split('#')[0].trim();
-    const skippedSet = new Set((skippedArticles || []).map(sa => normalizeUrl(sa.Link)));
-    const scrapedCount = currentArticles.filter(a => !skippedSet.has(normalizeUrl(a.Link))).length;
+    const normalizeUrl = (u) => (u || '').split('?')[0].split('#')[0].trim();
+    const skippedSet = new Set((skippedArticles || []).map(sa => normalizeUrl(sa.link)));
+    const scrapedCount = currentArticles.filter(a => !skippedSet.has(normalizeUrl(a.link))).length;
 
     countLabel.innerText = `${currentArticles.length} found (${scrapedCount} scraped / ${skippedSet.size} skipped)`;
 
@@ -558,7 +569,7 @@ function renderSourceArticles(skippedArticles = []) {
         ...art,
         originalIndex: idx + 1,
         citations: currentCitations[idx + 1] || 0,
-        skipped: skippedSet.has(normalizeUrl(art.Link))
+        skipped: skippedSet.has(normalizeUrl(art.link))
     }));
 
     if (currentSort === 'citations') {
@@ -578,14 +589,21 @@ function renderSourceArticles(skippedArticles = []) {
 
         const statusText = art.skipped ? ' [SKIPPED/PAYWALL]' : '';
 
+        const pubDate = art.published ? new Date(art.published).toLocaleDateString() : 'Unknown';
+        const fetchDate = art.fetch_date || 'N/A';
+
         li.innerHTML = `
             <div class="col-meta">
                 <span class="article-ref">[Article ${art.originalIndex}]</span> 
-                ${art.SourceName}
+                <strong>${art.source_name || ''}</strong>
                 ${citationBadge}
                 ${statusText}
             </div>
-            <a href="${art.Link}" target="_blank" class="col-title">${art.Title}</a>
+            <a href="${art.link}" target="_blank" class="col-title">${art.title}</a>
+            <div class="article-dates-row" style="margin-top: 6px; font-size: 11px; opacity: 0.8; display: flex; gap: 15px;">
+                <span>📅 Published: ${pubDate}</span>
+                <span>📥 Discovered: ${fetchDate}</span>
+            </div>
         `;
         list.appendChild(li);
     });
@@ -699,7 +717,7 @@ function bindCitationLinks(articles) {
     contentBox.querySelectorAll('a').forEach(anchor => {
         anchor.addEventListener('click', (e) => {
             const href = anchor.getAttribute('href');
-            const sourceIdx = articles.findIndex(a => a.Link === href || href.includes(a.Link));
+            const sourceIdx = articles.findIndex(a => a.link === href || (a.link && href.includes(a.link)));
 
             if (sourceIdx !== -1) {
                 e.preventDefault();

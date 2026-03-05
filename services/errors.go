@@ -37,3 +37,11 @@ func IsRateLimitError(err error) (bool, int) {
 
 	return false, 0
 }
+
+func IsOverloadedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "503") || strings.Contains(msg, "UNAVAILABLE") || strings.Contains(msg, "overloaded")
+}

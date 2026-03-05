@@ -99,11 +99,11 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 				feedStats[f.Name] = ingest.FeedStatus{Name: f.Name, URL: f.URL}
 			}
 			for _, c := range clusters {
-				compArticles := make([]services.CompressedArticle, len(c.Articles))
+				cachedArticles := make([]services.CachedArticle, len(c.Articles))
 				for i, a := range c.Articles {
-					compArticles[i] = services.CompressedArticle{Link: a.Link}
+					cachedArticles[i] = services.CachedArticle{Link: a.Link}
 				}
-				c.HasCachedDigest = services.IsDigestCached(compArticles)
+				c.HasCachedDigest = services.IsDigestCached(cachedArticles)
 
 				for _, a := range c.Articles {
 					if s, ok := feedStats[a.SourceName]; ok {
@@ -183,6 +183,7 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 		if matchedName != "" {
 			stat := feedStatsFull[matchedName]
 			if !existingLinks[a.Link] {
+				a.FetchDate = targetDate // Set the date it was fetched
 				newArticles = append(newArticles, a)
 				stat.NewCount++
 			}
@@ -208,11 +209,11 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 	// Save Cache
 	sendProgress("Finalizing and saving clusters...")
 	for _, c := range clusters {
-		compArticles := make([]services.CompressedArticle, len(c.Articles))
+		cachedArticles := make([]services.CachedArticle, len(c.Articles))
 		for i, a := range c.Articles {
-			compArticles[i] = services.CompressedArticle{Link: a.Link}
+			cachedArticles[i] = services.CachedArticle{Link: a.Link}
 		}
-		c.HasCachedDigest = services.IsDigestCached(compArticles)
+		c.HasCachedDigest = services.IsDigestCached(cachedArticles)
 	}
 
 	if err := services.SaveClustersCache(targetDate, clusters); err != nil {
@@ -244,14 +245,26 @@ func (app *AppState) HandleGenerateDigest(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// 0. Extract date and load clusters for that date
+	targetDate := r.URL.Query().Get("date")
+	if targetDate == "" {
+		targetDate = time.Now().Format("2006-01-02")
+	}
+
+	clusters, err := services.LoadClustersCache(targetDate)
+	if err != nil || len(clusters) == 0 {
+		http.Error(w, fmt.Sprintf(`{"error": "No cached topics found for %s"}`, targetDate), http.StatusNotFound)
+		return
+	}
+
 	topicIdxStr := r.URL.Query().Get("topicId")
 	topicIdx, err := strconv.Atoi(topicIdxStr)
-	if err != nil || topicIdx < 0 || topicIdx >= len(app.Clusters) {
+	if err != nil || topicIdx < 0 || topicIdx >= len(clusters) {
 		http.Error(w, `{"error": "Invalid topic ID"}`, http.StatusBadRequest)
 		return
 	}
 
-	selectedCluster := app.Clusters[topicIdx]
+	selectedCluster := clusters[topicIdx]
 	ctx := context.Background()
 
 	// Set headers for SSE if the client supports it or we want to stream
@@ -301,66 +314,101 @@ func (app *AppState) HandleGenerateDigest(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 1. Scrape full content
-	sendProgress(1, fmt.Sprintf("Scraping %d articles and decoding URLs...", len(selectedCluster.Articles)))
+	// targetDate is already extracted and validated at the top of the handler
 
-	var fullArticles []ingest.ArticleContent
+	var filteredArticles []ingest.ArticleSummary
+	for _, a := range selectedCluster.Articles {
+		if a.FetchDate == "" || a.FetchDate == targetDate {
+			filteredArticles = append(filteredArticles, a)
+		}
+	}
+
+	if len(filteredArticles) == 0 {
+		fmt.Fprintf(w, "event: error\ndata: %s\n\n", fmt.Sprintf(`{"message": "No articles found that were fetched on %s."}`, targetDate))
+		return
+	}
+
+	// 1. Prepare articles
+	sendProgress(1, fmt.Sprintf("Preparing %d articles (checking cache)...", len(filteredArticles)))
+
+	var readyArt []services.CachedArticle
+	var needsScraping []ingest.ArticleSummary
 	var skippedArticles []ingest.ArticleSummary
 
-	for _, summary := range selectedCluster.Articles {
-		if stat, ok := app.FeedStats[summary.SourceName]; ok {
-			stat.SkippedCount = 0
-			app.FeedStats[summary.SourceName] = stat
+	for _, s := range filteredArticles {
+		if s.CompressedSummary != "" {
+			readyArt = append(readyArt, services.CachedArticle{
+				Link:              s.Link,
+				Title:             s.Title,
+				SourceName:        s.SourceName,
+				RSSSummary:        s.Summary,
+				CompressedSummary: s.CompressedSummary,
+				Published:         s.Published,
+				FetchDate:         s.FetchDate,
+			})
+		} else {
+			needsScraping = append(needsScraping, s)
 		}
 	}
 
-	for _, summary := range selectedCluster.Articles {
-		articleData, err := ingest.ScrapeArticle(summary)
-		if err != nil {
-			log.Printf("Skipping [%s] '%s' (%s) due to error: %v", summary.SourceName, summary.Title, summary.Link, err)
-			skippedArticles = append(skippedArticles, summary)
-			if stat, ok := app.FeedStats[summary.SourceName]; ok {
-				stat.SkippedCount++
-				app.FeedStats[summary.SourceName] = stat
-			}
-			continue
-		}
+	var fullArticles []ingest.ArticleContent
+	var skippedCount int
 
-		if len(articleData.FullText) < 100 {
-			log.Printf("Skipping [%s] '%s' (%s) - extracted text too short (%d chars)", summary.SourceName, summary.Title, summary.Link, len(articleData.FullText))
-			skippedArticles = append(skippedArticles, summary)
-			if stat, ok := app.FeedStats[summary.SourceName]; ok {
-				stat.SkippedCount++
-				app.FeedStats[summary.SourceName] = stat
+	if len(needsScraping) > 0 {
+		sendProgress(1, fmt.Sprintf("Scraping %d new articles for %s (skipping %d cached)...", len(needsScraping), targetDate, len(readyArt)))
+		for _, summary := range needsScraping {
+			articleData, err := ingest.ScrapeArticle(summary)
+			if err != nil {
+				log.Printf("Failed to scrape %s: %v", summary.Link, err)
+				skippedCount++
+				skippedArticles = append(skippedArticles, summary)
+				if stat, ok := app.FeedStats[summary.SourceName]; ok {
+					stat.SkippedCount++
+					app.FeedStats[summary.SourceName] = stat
+				}
+				continue
 			}
-			continue
-		}
 
-		fullArticles = append(fullArticles, *articleData)
+			if len(articleData.FullText) < 100 {
+				log.Printf("Short text skip: %s (%d chars)", summary.Link, len(articleData.FullText))
+				skippedCount++
+				skippedArticles = append(skippedArticles, summary)
+				continue
+			}
+
+			fullArticles = append(fullArticles, *articleData)
+		}
 	}
 
-	if len(fullArticles) == 0 && len(skippedArticles) == 0 {
-		fmt.Fprintf(w, "event: error\ndata: %s\n\n", `{"message": "Could not scrape any articles for this topic."}`)
+	if len(readyArt) == 0 && len(fullArticles) == 0 {
+		fmt.Fprintf(w, "event: error\ndata: %s\n\n", `{"message": "Could not acquire any valid article summaries for this topic."}`)
 		return
 	}
 
-	// 2. Compress the articles concurrently
-	sendProgress(2, fmt.Sprintf("Extracting facts from %d articles...", len(fullArticles)))
-	compressedArticles, err := services.CompressArticles(ctx, fullArticles)
-	if err != nil {
-		log.Printf("Compression failed: %v", err)
-		if isLimit, wait := services.IsRateLimitError(err); isLimit {
-			event := map[string]interface{}{
-				"type":        "error",
-				"error":       "API Rate Limited",
-				"retry_after": wait,
+	// 2. Compress new articles concurrently
+	cachedArticles := readyArt
+	if len(fullArticles) > 0 {
+		sendProgress(2, fmt.Sprintf("Extracting facts from %d new articles...", len(fullArticles)))
+		newlyCompressed, err := services.CompressArticles(ctx, fullArticles)
+		if err != nil {
+			if isLimit, wait := services.IsRateLimitError(err); isLimit {
+				event := map[string]interface{}{
+					"type":        "error",
+					"error":       "API Rate Limited",
+					"retry_after": wait,
+				}
+				data, _ := json.Marshal(event)
+				fmt.Fprintf(w, "event: error\ndata: %s\n\n", data)
+				return
 			}
-			data, _ := json.Marshal(event)
-			fmt.Fprintf(w, "event: error\ndata: %s\n\n", data)
+			if services.IsOverloadedError(err) {
+				fmt.Fprintf(w, "event: error\ndata: %s\n\n", `{"error": "API Overloaded", "message": "Gemini API is currently overloaded. Please try again in a few moments."}`)
+				return
+			}
+			fmt.Fprintf(w, "event: error\ndata: %s\n\n", `{"message": "Failed to extract facts from articles"}`)
 			return
 		}
-		fmt.Fprintf(w, "event: error\ndata: %s\n\n", `{"message": "Failed to extract facts from articles"}`)
-		return
+		cachedArticles = append(cachedArticles, newlyCompressed...)
 	}
 
 	// 3. Generate digest (with yesterday's context if available)
@@ -379,24 +427,23 @@ func (app *AppState) HandleGenerateDigest(w http.ResponseWriter, r *http.Request
 					prevLinks[i] = a.Link
 				}
 				if content, exists := services.GetCachedDigest(prevLinks); exists {
-					log.Printf("[Deltas] Found yesterday's digest for '%s', providing as context.", selectedCluster.Title)
 					previousDigest = content
+					foundMatch = true
+					log.Printf("[Deltas] Found yesterday's digest for '%s', using as context.\n", yc.Title)
+					break
 				}
-				foundMatch = true
-				break
 			}
 		}
 		if !foundMatch {
-			log.Printf("[Deltas] No title match found yesterday for today's topic '%s'. (Found %d topics yesterday)", selectedCluster.Title, len(yesterdayClusters))
+			log.Printf("[Deltas] No matching topic title found in yesterday's cache for '%s'.\n", selectedCluster.Title)
 		}
 	} else {
-		log.Printf("[Deltas] No yesterday cache found for %s", yesterday)
+		log.Printf("[Deltas] Missing yesterday's cluster cache (%s): %v\n", yesterday, err)
 	}
 
 	sendProgress(3, "Synthesizing final digest with Gemini...")
-	digest, err := services.GenerateDigest(ctx, compressedArticles, previousDigest)
+	digest, err := services.GenerateDigest(ctx, cachedArticles, previousDigest)
 	if err != nil {
-		log.Printf("Digest generation failed: %v", err)
 		if isLimit, wait := services.IsRateLimitError(err); isLimit {
 			event := map[string]interface{}{
 				"type":        "error",
@@ -405,6 +452,10 @@ func (app *AppState) HandleGenerateDigest(w http.ResponseWriter, r *http.Request
 			}
 			data, _ := json.Marshal(event)
 			fmt.Fprintf(w, "event: error\ndata: %s\n\n", data)
+			return
+		}
+		if services.IsOverloadedError(err) {
+			fmt.Fprintf(w, "event: error\ndata: %s\n\n", `{"error": "API Overloaded", "message": "Gemini API is currently overloaded. Please try again in a few moments."}`)
 			return
 		}
 		fmt.Fprintf(w, "event: error\ndata: %s\n\n", `{"message": "Failed to generate digest"}`)

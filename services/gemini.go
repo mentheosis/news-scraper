@@ -20,7 +20,7 @@ func getDigestCacheDir() string {
 	return dir
 }
 
-func getDigestHash(articles []CompressedArticle) string {
+func getDigestHash(articles []CachedArticle) string {
 	links := make([]string, len(articles))
 	for i, a := range articles {
 		links[i] = a.Link
@@ -43,7 +43,7 @@ func GetDigestHashFromLinks(links []string) string {
 }
 
 // IsDigestCached checks if a digest already exists for the given articles
-func IsDigestCached(articles []CompressedArticle) bool {
+func IsDigestCached(articles []CachedArticle) bool {
 	links := make([]string, len(articles))
 	for i, a := range articles {
 		links[i] = a.Link
@@ -68,7 +68,7 @@ func GetCachedDigest(links []string) (string, bool) {
 
 // GenerateDigest takes a list of compressed article facts
 // and returns a synthesized Markdown digest using Gemini.
-func GenerateDigest(ctx context.Context, articles []CompressedArticle, previousDigest string) (string, error) {
+func GenerateDigest(ctx context.Context, articles []CachedArticle, previousDigest string) (string, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return "", fmt.Errorf("GEMINI_API_KEY environment variable is not set")
@@ -126,7 +126,7 @@ func GenerateDigest(ctx context.Context, articles []CompressedArticle, previousD
 	return finalText, nil
 }
 
-func buildPrompt(articles []CompressedArticle, previousDigest string) string {
+func buildPrompt(articles []CachedArticle, previousDigest string) string {
 	promptText := "You are a professional news digester. I will provide you with a list of extracted facts from several recent news articles covering a SINGLE major event or topic. Your job is to create a well-structured, comprehensive Markdown digest of this particular event based on the given facts.\n\n"
 
 	if previousDigest != "" {
@@ -151,7 +151,7 @@ func buildPrompt(articles []CompressedArticle, previousDigest string) string {
 		promptText += fmt.Sprintf("Source: %s\n", a.SourceName)
 		promptText += fmt.Sprintf("Title: %s\n", a.Title)
 		promptText += fmt.Sprintf("URL: %s\n", a.Link)
-		promptText += fmt.Sprintf("Extracted Facts:\n%s\n\n", a.Summary)
+		promptText += fmt.Sprintf("Extracted Facts:\n%s\n\n", a.CompressedSummary)
 	}
 
 	return promptText

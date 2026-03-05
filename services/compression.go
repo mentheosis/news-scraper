@@ -15,13 +15,7 @@ import (
 	"google.golang.org/genai"
 )
 
-// CompressedArticle holds the facts extracted from a raw HTML scrape
-type CompressedArticle struct {
-	Link       string `json:"link"`
-	Title      string `json:"title"`
-	SourceName string `json:"source_name"`
-	Summary    string `json:"summary"` // Fact-extracted text from Gemini
-}
+// CachedArticle is defined in cache.go
 
 func getArticleCacheDir() string {
 	dir := filepath.Join(".", ".cache", "articles")
@@ -36,7 +30,7 @@ func getArticleHash(link string) string {
 
 // CompressArticles takes a slice of raw full articles and compresses them concurrently via Gemini.
 // It checks the local disk cache first before calling the LLM.
-func CompressArticles(ctx context.Context, articles []ingest.ArticleContent) ([]CompressedArticle, error) {
+func CompressArticles(ctx context.Context, articles []ingest.ArticleContent) ([]CachedArticle, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is not set")
@@ -50,7 +44,7 @@ func CompressArticles(ctx context.Context, articles []ingest.ArticleContent) ([]
 	}
 
 	cacheDir := getArticleCacheDir()
-	results := make([]CompressedArticle, len(articles))
+	results := make([]CachedArticle, len(articles))
 	var wg sync.WaitGroup
 	var errMu sync.Mutex
 	var firstErr error
@@ -77,9 +71,8 @@ func CompressArticles(ctx context.Context, articles []ingest.ArticleContent) ([]
 			// 1. Check local cache
 			data, err := os.ReadFile(cachePath)
 			if err == nil {
-				var cached CompressedArticle
-				if json.Unmarshal(data, &cached) == nil {
-					// log.Printf("Cache hit for article: %s", article.Title)
+				var cached CachedArticle
+				if json.Unmarshal(data, &cached) == nil && cached.CompressedSummary != "" {
 					results[idx] = cached
 					return
 				}
@@ -87,7 +80,7 @@ func CompressArticles(ctx context.Context, articles []ingest.ArticleContent) ([]
 
 			log.Printf("Cache miss. Starting compression for: %s", article.Title)
 
-			// 2. Fetch via LLM API (acquire semaphore context)
+			// 2. Fetch via LLM API
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -112,18 +105,31 @@ func CompressArticles(ctx context.Context, articles []ingest.ArticleContent) ([]
 				summary = "Failed to extract summary."
 			}
 
-			comp := CompressedArticle{
-				Link:       article.Link,
-				Title:      article.Title,
-				SourceName: article.SourceName,
-				Summary:    summary,
-			}
+			// Save to central store
+			SaveCompressedSummary(article.Link, summary)
 
-			results[idx] = comp
-
-			// Save to cache
-			if b, err := json.MarshalIndent(comp, "", "  "); err == nil {
-				os.WriteFile(cachePath, b, 0644)
+			// Reload full metadata to return complete object
+			if cached, err := LoadArticleMetadata(article.Link); err == nil {
+				// LoadArticleMetadata returns ArticleSummary, we need CachedArticle
+				results[idx] = CachedArticle{
+					Link:              cached.Link,
+					Title:             cached.Title,
+					SourceName:        cached.SourceName,
+					RSSSummary:        cached.Summary,
+					CompressedSummary: summary,
+					Published:         cached.Published,
+					FetchDate:         cached.FetchDate,
+				}
+			} else {
+				results[idx] = CachedArticle{
+					Link:              article.Link,
+					Title:             article.Title,
+					SourceName:        article.SourceName,
+					RSSSummary:        article.Summary,
+					CompressedSummary: summary,
+					Published:         article.Published,
+					FetchDate:         article.FetchDate,
+				}
 			}
 
 		}(i, art)

@@ -17,7 +17,7 @@ type TopicCluster struct {
 	SourceCounts    map[string]int          `json:"source_counts"`
 	Indices         []int                   `json:"article_indices"`
 	HasCachedDigest bool                    `json:"has_cached_digest"`
-	Articles        []ingest.ArticleSummary `json:"-"` // We map this later
+	Articles        []ingest.ArticleSummary `json:"articles"`
 }
 
 // ClusterTopics uses Gemini to group the provided articles into 5-10 major topics.

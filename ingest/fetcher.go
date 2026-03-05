@@ -12,11 +12,13 @@ import (
 
 // ArticleSummary represents a parsed item from an RSS feed.
 type ArticleSummary struct {
-	SourceName string
-	Title      string
-	Link       string
-	Summary    string // Usually the RSS description
-	Published  *time.Time
+	SourceName        string     `json:"source_name"`
+	Title             string     `json:"title"`
+	Link              string     `json:"link"`
+	Summary           string     `json:"summary"` // Usually the RSS description
+	CompressedSummary string     `json:"compressed_summary"`
+	Published         *time.Time `json:"published"`
+	FetchDate         string     `json:"fetch_date"`
 }
 
 // FeedStatus represents the health and extraction count for a specific feed source.
