@@ -231,6 +231,41 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "event: result\ndata: %s\n\n", data)
 }
 
+// HandleHotTake generates a persona-based hot take on a provided news digest.
+func (app *AppState) HandleHotTake(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, `{"error": "name is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		Digest string `json:"digest"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Digest == "" {
+		http.Error(w, `{"error": "digest is required in request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	ctx := context.Background()
+	take, err := services.GenerateHotTake(ctx, name, body.Digest)
+	if err != nil {
+		log.Printf("Hot take failed for %q: %v", name, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"error": %q}`, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"take": take})
+}
+
 // HandleListDates returns the available cached news dates
 func (app *AppState) HandleListDates(w http.ResponseWriter, r *http.Request) {
 	dates := services.ListCacheDates()
