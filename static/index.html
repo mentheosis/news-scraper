@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AgNews | AI Digester</title>
-    <link rel="stylesheet" href="style.css?v=1.2">
+    <link rel="stylesheet" href="style.css?v=1.5">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
     <!-- Markdown Parser -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-    <script src="app.js?v=1.2" defer></script>
+    <script src="app.js?v=1.5" defer></script>
 </head>
 
 <body class="theme-dark">
@@ -164,6 +164,19 @@
             <div id="digest-view" class="digest-view hidden">
                 <header class="digest-header">
                     <h1 id="digest-title">Topic Title</h1>
+                    <div class="hot-takes-bar">
+                        <span class="hot-takes-label">Hot take from:</span>
+                        <button class="hot-take-btn preset" data-name="Ezra Klein">Ezra Klein</button>
+                        <button class="hot-take-btn preset" data-name="Paul Krugman">Paul Krugman</button>
+                        <button class="hot-take-btn preset" data-name="Felix Biederman">Felix Biederman</button>
+                        <button class="hot-take-btn preset" data-name="AOC">AOC</button>
+                        <button class="hot-take-btn preset" data-name="Tucker Carlson">Tucker Carlson</button>
+                        <button class="hot-take-btn preset" data-name="JD Vance">JD Vance</button>
+                        <div class="hot-take-custom-input-wrap">
+                            <input type="text" id="hot-take-custom-input" class="hot-take-input" placeholder="Anyone else...">
+                            <button id="hot-take-custom-btn" class="hot-take-btn">Go</button>
+                        </div>
+                    </div>
                 </header>
                 <div id="digest-content" class="markdown-body">
                     <!-- Markdown injected by JS -->
@@ -189,6 +202,25 @@
                 </div>
             </div>
         </aside>
+    </div>
+
+    <!-- Hot Take Modal -->
+    <div id="hot-take-modal" class="hot-take-modal hidden">
+        <div class="hot-take-backdrop" id="hot-take-backdrop"></div>
+        <div class="hot-take-modal-card">
+            <div class="hot-take-modal-header">
+                <div class="hot-take-author-info">
+                    <strong id="hot-take-author-name"></strong>
+                    <span class="hot-take-badge">Hot Take</span>
+                </div>
+                <button id="close-hot-take" class="icon-btn-small" title="Close">✕</button>
+            </div>
+            <div id="hot-take-loading" class="hot-take-loading hidden">
+                <div class="spinner hot-take-spinner"></div>
+                <span>Channeling...</span>
+            </div>
+            <div id="hot-take-content" class="hot-take-content"></div>
+        </div>
     </div>
 
 </body>

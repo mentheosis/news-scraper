@@ -126,6 +126,52 @@ func GenerateDigest(ctx context.Context, articles []CachedArticle, previousDiges
 	return finalText, nil
 }
 
+var curatedPersonas = map[string]string{
+	"Ezra Klein":      "You are Ezra Klein. Give your hot take in 3-5 sentences — no more. Lead immediately with the structural or systemic insight everyone else is missing. Skip the throat-clearing. Be sharp, a little contrarian, and land on something that reframes the whole story.",
+	"Paul Krugman":    "You are Paul Krugman. 2-4 sentences. Be blunt and economically precise. Call out the bad faith or the obvious bad policy if you see it. You can be smug. No padding.",
+	"Felix Biederman": "You are Felix Biederman, co-host of Chapo Trap House. Dirtbag left. 2-4 sentences of cynical, funny, working-class-coded outrage. You can use sports metaphors. You are disgusted by liberals and conservatives alike but especially libs. Keep it caustic and a little unhinged.",
+	"AOC":             "You are Alexandria Ocasio-Cortez. 3-5 sentences. Passionate, direct, and rooted in working-class and justice framing. Call out who benefits and who gets hurt. You speak plainly and don't hide your moral clarity.",
+	"Tucker Carlson":  "You are Tucker Carlson. 3-5 sentences. Populist, anti-elite, suspicious of official narratives. Ask the questions the corporate media won't ask. Invoke the forgotten American. Sound like you're the only one willing to say it.",
+	"JD Vance":        "You are JD Vance, Vice President of the United States. 3-5 sentences. Nationalist, anti-globalist, MAGA-aligned. Frame everything through what it means for working Americans and American sovereignty. You've moved far from Hillbilly Elegy — you're all in now.",
+}
+
+// GenerateHotTake generates a hot take on the given news digest, voiced as the named person.
+// If the name matches a curated persona, a tailored prompt is used; otherwise a generic one is generated.
+func GenerateHotTake(ctx context.Context, name string, digest string) (string, error) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		return "", fmt.Errorf("GEMINI_API_KEY environment variable is not set")
+	}
+
+	systemPrompt, ok := curatedPersonas[name]
+	if !ok {
+		systemPrompt = fmt.Sprintf(
+			"You are %s. In 3-5 sentences, give your raw hot take on this news story — no preamble, no hedging. Pure voice. Distill your worldview, rhetorical style, and characteristic obsessions into something sharp and immediate.",
+			name,
+		)
+	}
+
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey: apiKey,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create genai client: %w", err)
+	}
+
+	prompt := systemPrompt + "\n\nHere is a news digest about a current event. Read it and give your hot take on it:\n\n" + digest
+
+	resp, err := client.Models.GenerateContent(ctx, "gemini-2.5-flash", genai.Text(prompt), nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate hot take: %w", err)
+	}
+
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("no response generated")
+	}
+
+	return resp.Candidates[0].Content.Parts[0].Text, nil
+}
+
 func buildPrompt(articles []CachedArticle, previousDigest string) string {
 	promptText := "You are a professional news digester. I will provide you with a list of extracted facts from several recent news articles covering a SINGLE major event or topic. Your job is to create a well-structured, comprehensive Markdown digest of this particular event based on the given facts.\n\n"
 

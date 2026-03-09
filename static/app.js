@@ -71,6 +71,25 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('sort-cite-btn').addEventListener('click', () => {
         setSort('citations');
     });
+
+    document.querySelectorAll('.hot-take-btn.preset').forEach(btn => {
+        btn.addEventListener('click', () => fetchHotTake(btn.dataset.name));
+    });
+
+    document.getElementById('hot-take-custom-btn').addEventListener('click', () => {
+        const name = document.getElementById('hot-take-custom-input').value.trim();
+        if (name) fetchHotTake(name);
+    });
+
+    document.getElementById('hot-take-custom-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const name = e.target.value.trim();
+            if (name) fetchHotTake(name);
+        }
+    });
+
+    document.getElementById('close-hot-take').addEventListener('click', closeHotTakeModal);
+    document.getElementById('hot-take-backdrop').addEventListener('click', closeHotTakeModal);
 });
 
 async function fetchDates() {
@@ -145,6 +164,7 @@ function closeSidebar(sidebarId, btnId) {
 let currentArticles = [];
 let currentCitations = {};
 let currentSort = 'number';
+let currentDigestMarkdown = '';
 
 async function fetchTopics(isRefresh = true, targetDate = '') {
     const topicList = document.getElementById('topic-list');
@@ -358,6 +378,8 @@ async function generateDigest(topicIdx, title) {
     // Reset sidebars/panels
     loadingState.classList.remove('hidden');
     contentBox.innerHTML = '';
+    currentDigestMarkdown = '';
+    closeHotTakeModal();
 
     // Clear Navigation Panel
     const navList = document.getElementById('header-nav-list');
@@ -441,6 +463,7 @@ async function generateDigest(topicIdx, title) {
                         return;
                     } else if (eventType === 'result') {
                         // Render final result
+                        currentDigestMarkdown = data.digest;
                         titleBox.innerText = data.title;
                         contentBox.innerHTML = marked.parse(data.digest);
 
@@ -792,6 +815,52 @@ function handleDigestRateLimit(seconds, retryCallback) {
             updateUI();
         }
     }, 1000);
+}
+
+function closeHotTakeModal() {
+    document.getElementById('hot-take-modal').classList.add('hidden');
+}
+
+async function fetchHotTake(name) {
+    if (!currentDigestMarkdown || !name) return;
+
+    const modal = document.getElementById('hot-take-modal');
+    const loading = document.getElementById('hot-take-loading');
+    const content = document.getElementById('hot-take-content');
+    const authorName = document.getElementById('hot-take-author-name');
+
+    authorName.innerText = name;
+    content.innerHTML = '';
+    content.classList.add('hidden');
+    loading.classList.remove('hidden');
+    modal.classList.remove('hidden');
+
+    // Highlight matching preset button (if any), clear others
+    document.querySelectorAll('.hot-take-btn.preset').forEach(b => {
+        b.classList.toggle('active', b.dataset.name === name);
+    });
+
+    try {
+        const res = await fetch(`/api/hot-take?name=${encodeURIComponent(name)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ digest: currentDigestMarkdown }),
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Server error ${res.status}`);
+        }
+
+        const data = await res.json();
+        loading.classList.add('hidden');
+        content.classList.remove('hidden');
+        content.innerHTML = marked.parse(data.take);
+    } catch (err) {
+        loading.classList.add('hidden');
+        content.classList.remove('hidden');
+        content.innerHTML = `<p style="color:#f85149;">Failed to generate hot take: ${err.message}</p>`;
+    }
 }
 
 function renderHeaderNav(markdown) {
