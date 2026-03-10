@@ -413,6 +413,9 @@ func (app *AppState) HandleGenerateDigest(w http.ResponseWriter, r *http.Request
 
 	// 3. Generate digest (with yesterday's context if available)
 	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	if t, err := time.Parse("2006-01-02", targetDate); err == nil {
+		yesterday = t.AddDate(0, 0, -1).Format("2006-01-02")
+	}
 	var previousDigest string
 
 	yesterdayClusters, err := services.LoadClustersCache(yesterday)

@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     fetchDates();
-    fetchTopics(false); // Initial load: try cache first
+    const today = getLocalYYYYMMDD();
+    fetchTopics(false, today); // Initial load: try cache for TODAY local
 
     // -- Mini Strip Navigation --
     document.getElementById('btn-show-topics').addEventListener('click', () => {
@@ -35,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('refresh-btn').addEventListener('click', () => {
         // Refresh always targets "Today"
         const dateSelect = document.getElementById('news-date-select');
-        const today = new Date().toISOString().split('T')[0];
+        const today = getLocalYYYYMMDD();
 
         // If we are on another day, switch to today and refresh
         if (dateSelect.value !== today) {
@@ -77,7 +78,7 @@ async function fetchDates() {
         const res = await fetch('/api/dates');
         const data = await res.json();
         const select = document.getElementById('news-date-select');
-        const today = new Date().toISOString().split('T')[0];
+        const today = getLocalYYYYMMDD();
 
         select.innerHTML = '';
 
@@ -152,7 +153,7 @@ async function fetchTopics(isRefresh = true, targetDate = '') {
     const statusText = document.getElementById('status-text-topics');
     const topicsHeader = document.querySelector('.topics-header');
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalYYYYMMDD();
     if (!targetDate) {
         targetDate = document.getElementById('news-date-select').value || today;
     }
@@ -377,7 +378,7 @@ async function generateDigest(topicIdx, title) {
     document.getElementById('loading-status-text').innerText = `Preparing sources for: ${title}...`;
     document.getElementById('progress-step').innerText = "Initializing...";
 
-    const targetDate = document.getElementById('news-date-select').value || new Date().toISOString().split('T')[0];
+    const targetDate = document.getElementById('news-date-select').value || getLocalYYYYMMDD();
     try {
         const response = await fetch(`/api/digest?topicId=${topicIdx}&date=${targetDate}`, { method: 'POST' });
 
@@ -767,30 +768,25 @@ function handleDigestRateLimit(seconds, retryCallback) {
     loadingState.classList.add('hidden');
     digestView.classList.remove('hidden');
 
-    titleBox.innerText = 'Rate Limit Exceeded (429)';
-
     let remaining = seconds || 60;
 
     const updateUI = () => {
         contentBox.innerHTML = `
-            <div class="error-box" style="border-left-color: var(--status-warn); background: rgba(234, 179, 8, 0.1);">
-                <p>Gemini API free quota exceeded. Waiting to retry...</p>
-                <div style="font-size: 24px; font-weight: bold; margin-top: 15px; text-align: center; color: var(--status-warn);">
-                    Retrying in ${remaining}s
+            <div class="rate-limit-state">
+                <p style="color:var(--status-warn); font-weight:bold;">Gemini Rate Limit Exceeded</p>
+                <p>Synthesis will resume automatically in <strong>${remaining}s</strong>...</p>
+                <div class="progress-bar-container" style="margin-top:15px;">
+                    <div class="progress-bar-fill" style="width: ${(1 - remaining / (seconds || 60)) * 100}%"></div>
                 </div>
-            </div>`;
+            </div>
+        `;
     };
 
     updateUI();
-
     const intv = setInterval(() => {
         remaining--;
         if (remaining <= 0) {
             clearInterval(intv);
-            contentBox.innerHTML = `
-                <div class="error-box">
-                    <p>Retrying now...</p>
-                </div>`;
             retryCallback();
         } else {
             updateUI();
@@ -838,4 +834,11 @@ function renderHeaderNav(markdown) {
     if (headerCount === 0) {
         navList.innerHTML = `<div class="empty-nav-msg">No headers found in this digest.</div>`;
     }
+}
+
+function getLocalYYYYMMDD() {
+    const now = new Date();
+    const offset = now.getTimezoneOffset();
+    const localTime = new Date(now.getTime() - (offset * 60 * 1000));
+    return localTime.toISOString().split('T')[0];
 }
