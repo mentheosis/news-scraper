@@ -3,7 +3,7 @@ export class GraphEngine {
         this.nodes = [];
         this.edges = [];
         this.k = 0.1; // Spring constant
-        this.repulsion = 5000;
+        this.repulsion = 10000;
         this.friction = 0.9;
         this.minDistance = 100;
     }

@@ -41,12 +41,21 @@ export class GraphRenderer {
         };
     }
 
+    getNodeRadius(node) {
+        if (node.type === 'topic' && node.articleCount) {
+            // Sub-linear growth: base 30 + 5 * sqrt(count)
+            return 30 + Math.sqrt(node.articleCount) * 5;
+        }
+        return 30; // Default for ideas
+    }
+
     handleMouseDown(e) {
         const pos = this.getMousePos(e);
         const nodeBelow = this.engine.nodes.find(n => {
             const dx = n.x - pos.x;
             const dy = n.y - pos.y;
-            return Math.sqrt(dx * dx + dy * dy) < 30; // Node radius
+            const radius = this.getNodeRadius(n);
+            return Math.sqrt(dx * dx + dy * dy) < radius;
         });
 
         if (nodeBelow) {
@@ -71,6 +80,13 @@ export class GraphRenderer {
         if (this.isConnecting && this.connectFrom) {
             this.connectToPos = pos;
         } else if (this.selectedNode && this.selectedNode.dragging) {
+            // Update wobble directly during drag for jello effect
+            const dx = pos.x - this.selectedNode.x;
+            const dy = pos.y - this.selectedNode.y;
+            const speed = Math.sqrt(dx * dx + dy * dy);
+            if (this.selectedNode.wobble === undefined) this.selectedNode.wobble = 0;
+            this.selectedNode.wobble += speed * 0.02;
+
             this.selectedNode.x = pos.x;
             this.selectedNode.y = pos.y;
         } else if (this.draggingCanvas) {
@@ -80,7 +96,8 @@ export class GraphRenderer {
             this.hoveredNode = this.engine.nodes.find(n => {
                 const dx = n.x - pos.x;
                 const dy = n.y - pos.y;
-                return Math.sqrt(dx * dx + dy * dy) < 30;
+                const radius = this.getNodeRadius(n);
+                return Math.sqrt(dx * dx + dy * dy) < radius;
             });
         }
     }
@@ -91,7 +108,8 @@ export class GraphRenderer {
             const targetNode = this.engine.nodes.find(n => {
                 const dx = n.x - pos.x;
                 const dy = n.y - pos.y;
-                return n !== this.connectFrom && Math.sqrt(dx * dx + dy * dy) < 30;
+                const radius = this.getNodeRadius(n);
+                return n !== this.connectFrom && Math.sqrt(dx * dx + dy * dy) < radius;
             });
 
             if (targetNode) {
@@ -112,6 +130,25 @@ export class GraphRenderer {
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
         this.zoom *= delta;
         this.zoom = Math.max(0.1, Math.min(5, this.zoom));
+    }
+
+    wrapText(text, maxWidth) {
+        const words = text.split(' ');
+        const lines = [];
+        let currentLine = words[0];
+
+        for (let i = 1; i < words.length; i++) {
+            const word = words[i];
+            const width = this.ctx.measureText(currentLine + " " + word).width;
+            if (width < maxWidth) {
+                currentLine += " " + word;
+            } else {
+                lines.push(currentLine);
+                currentLine = word;
+            }
+        }
+        lines.push(currentLine);
+        return lines;
     }
 
     draw() {
@@ -147,23 +184,72 @@ export class GraphRenderer {
         }
 
         // Draw nodes
+        const time = performance.now() * 0.01; // Sped up time
         for (const node of this.engine.nodes) {
             const isSelected = node === this.selectedNode;
             const isHovered = node === this.hoveredNode;
+            const radius = this.getNodeRadius(node);
+
+            // Persistent wobble that decays over time for "springy" feel
+            if (node.wobble === undefined) node.wobble = 0;
+
+            const speed = Math.sqrt((node.vx || 0) ** 2 + (node.vy || 0) ** 2);
+            // Boost wobble based on speed (Lowered sensitivity)
+            node.wobble += speed * 0.02;
+            // Decay wobble (Increased settling time by ~3x)
+            node.wobble *= 0.975;
+            // Cap it to a subtle maximum
+            const wobbleScale = Math.min(node.wobble, 1.65);
 
             ctx.beginPath();
-            ctx.arc(node.x, node.y, 30, 0, Math.PI * 2);
-            ctx.fillStyle = isSelected ? '#58a6ff' : (isHovered ? '#30363d' : '#161b22');
+            const segments = 80; // Higher segment count for high-frequency waves
+            for (let i = 0; i <= segments; i++) {
+                const angle = (i / segments) * Math.PI * 2;
+                // Standing wave: sin(k*theta) * sin(w*t)
+                // Using two frequencies for a more complex "standing" shimmer
+                const ripple = Math.sin(angle * 12) * Math.sin(time * 6) * 0.6 +
+                    Math.cos(angle * 20) * Math.cos(time * 10) * 0.4;
+                const offset = ripple * wobbleScale;
+                const r = radius + offset;
+                const px = node.x + Math.cos(angle) * r;
+                const py = node.y + Math.sin(angle) * r;
+
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+
+            // Color logic
+            let baseColor, strokeColor;
+            if (node.type === 'topic') {
+                baseColor = isSelected ? '#ffea00' : (isHovered ? '#f4e04d' : '#fff9c4'); // Pale Yellow
+                strokeColor = isSelected ? '#fff' : '#fbc02d';
+            } else {
+                baseColor = isSelected ? '#00b0ff' : (isHovered ? '#4fc3f7' : '#e1f5fe'); // Pale Blue
+                strokeColor = isSelected ? '#fff' : '#0288d1';
+            }
+
+            ctx.fillStyle = baseColor;
             ctx.fill();
-            ctx.strokeStyle = isSelected ? '#fff' : '#30363d';
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = isSelected ? 3 : 2;
             ctx.stroke();
 
-            // Label
-            ctx.fillStyle = '#fff';
+            // Label - Wrapped and Centered
+            ctx.fillStyle = '#161b22'; // Dark text for pale bubbles
             ctx.font = '10px Inter';
             ctx.textAlign = 'center';
-            ctx.fillText(node.label, node.x, node.y + 5);
+            ctx.textBaseline = 'middle';
+
+            const maxWidth = radius * 1.8;
+            const lines = this.wrapText(node.label, maxWidth);
+            const lineHeight = 12;
+            const totalHeight = lines.length * lineHeight;
+
+            lines.forEach((line, i) => {
+                const yOffset = (i * lineHeight) - (totalHeight / 2) + (lineHeight / 2);
+                ctx.fillText(line, node.x, node.y + yOffset);
+            });
         }
 
         ctx.restore();

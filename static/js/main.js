@@ -88,6 +88,7 @@ function triggerGraphSave() {
             type: n.type,
             label: n.label,
             summary: n.summary,
+            articleCount: n.articleCount || 0,
             x: n.x,
             y: n.y
         })),
@@ -153,9 +154,19 @@ function initGraphViewEvents() {
             const researchBtn = document.getElementById('node-research-btn');
             const saveBtn = document.getElementById('node-save-btn');
             const deleteBtn = document.getElementById('node-delete-btn');
+            const articleCountLabel = document.getElementById('node-article-count');
 
             if (labelInput) labelInput.value = node.label;
             if (summaryArea) summaryArea.value = node.summary || '';
+
+            if (articleCountLabel) {
+                if (node.type === 'topic' && node.articleCount > 0) {
+                    articleCountLabel.innerText = `${node.articleCount} articles`;
+                    articleCountLabel.classList.remove('hidden');
+                } else {
+                    articleCountLabel.classList.add('hidden');
+                }
+            }
 
             const isTopic = node.type === 'topic';
             if (typeBadge) {
@@ -264,14 +275,28 @@ function syncTopicsToGraph() {
     if (!state.allTopics || !graphEngine) return;
     let added = false;
     state.allTopics.forEach(topic => {
-        if (!graphEngine.nodes.find(n => n.id === topic.title)) {
+        const count = topic.articles ? topic.articles.length : (topic.article_indices ? topic.article_indices.length : 0);
+        const existing = graphEngine.nodes.find(n => n.id === topic.title);
+
+        if (!existing) {
             graphEngine.addNode({
                 id: topic.title,
                 type: 'topic',
                 label: topic.title,
-                summary: topic.description
+                summary: topic.description,
+                articleCount: count
             });
             added = true;
+        } else {
+            // Update existing node with latest count and description if they changed
+            if (existing.articleCount !== count) {
+                existing.articleCount = count;
+                added = true;
+            }
+            if (existing.summary !== topic.description) {
+                existing.summary = topic.description;
+                added = true;
+            }
         }
     });
     if (added) triggerGraphSave();
