@@ -15,9 +15,44 @@ let viewLoader;
 document.addEventListener('DOMContentLoaded', async () => {
     viewLoader = new ViewLoader('view-container');
 
-    // Global App Initialized
-    // (Wait for initial view load before fetching page-specific data)
+    // Navigation Listener (Add before initial load)
+    document.addEventListener('view-change', (e) => {
+        const view = e.detail.view;
+        if (view === 'news' && activeView !== 'news') {
+            viewLoader.load('news-feed');
+        } else if (view === 'graph' && activeView !== 'graph') {
+            viewLoader.load('graph-view');
+        }
+    });
 
+    // View Loaded Handler
+    document.addEventListener('view-loaded', (e) => {
+        const viewName = e.detail.view;
+        activeView = viewName === 'news-feed' ? 'news' : 'graph';
+
+        if (viewName === 'news-feed') {
+            initNewsFeedEvents();
+            if (state.allTopics && state.allTopics.length > 0) {
+                renderTopics(state.allTopics);
+                // Also restore feed health if available
+                if (state.feedHealth) renderFeedHealth(state.feedHealth);
+
+                // Restore active digest if one was selected
+                if (state.topicSelectionHistory.length > 0) {
+                    const activeTitle = state.topicSelectionHistory[0];
+                    const topic = state.allTopics.find(t => t.title === activeTitle);
+                    if (topic) {
+                        import('./api.js').then(m => m.generateDigest(topic.originalIndex, topic.title));
+                    }
+                }
+            }
+        } else if (viewName === 'graph-view') {
+            initGraphViewEvents();
+            syncTopicsToGraph();
+        }
+    });
+
+    // Global App Initialized
     // Initialize Graph Engine Early
     graphEngine = new GraphEngine();
     const persistedGraph = await fetchGraph();
@@ -32,31 +67,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Fetch topics/dates after view is loaded
     fetchDates();
     fetchTopics(false, getLocalYYYYMMDD());
-
-    // Navigation Listener
-    document.addEventListener('view-change', (e) => {
-        const view = e.detail.view;
-        if (view === 'news') {
-            viewLoader.load('news-feed');
-        } else if (view === 'graph') {
-            viewLoader.load('graph-view');
-        }
-    });
-
-    // View Loaded Handler
-    document.addEventListener('view-loaded', (e) => {
-        const viewName = e.detail.view;
-        activeView = viewName === 'news-feed' ? 'news' : 'graph';
-
-        if (viewName === 'news-feed') {
-            initNewsFeedEvents();
-            if (state.allTopics) renderTopics(state.allTopics);
-            if (state.feedHealth) renderFeedHealth(state.feedHealth);
-        } else if (viewName === 'graph-view') {
-            initGraphViewEvents();
-            syncTopicsToGraph();
-        }
-    });
 
     // Global Modal Listener
     document.getElementById('close-hot-take')?.addEventListener('click', () => {
