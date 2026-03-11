@@ -15,20 +15,24 @@
                 <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
         </button>
-
-        <!-- Use ag-sidebar for node editing too! -->
-        <ag-sidebar id="node-edit-sidebar" class="sidebar collapsed" width="300px" side="right">
-            <div slot="header" class="panel-header">
-                <h4 id="node-label">Node Title</h4>
-                <button id="close-node-edit" class="icon-btn-small">✕</button>
-            </div>
-            <div slot="body" class="panel-body">
-                <textarea id="node-summary" placeholder="Summary..."></textarea>
-                <div class="panel-actions">
-                    <button id="node-research-btn" class="node-btn research">Ask AI to Research</button>
-                    <button id="node-save-btn" class="node-btn save">Save Changes</button>
-                </div>
-            </div>
-        </ag-sidebar>
     </div>
+
+    <!-- Move sidebar outside graph-container so flex works -->
+    <ag-sidebar id="node-edit-sidebar" class="sidebar collapsed" width="340px" side="right">
+        <div slot="header" class="panel-header">
+            <div class="header-main">
+                <input type="text" id="node-label-input" class="node-label-input" placeholder="Node Title">
+                <span id="node-type-badge" class="type-badge">Topic</span>
+            </div>
+            <button id="close-node-edit" class="icon-btn-small">✕</button>
+        </div>
+        <div slot="body" class="panel-body">
+            <textarea id="node-summary" placeholder="Summary..."></textarea>
+            <div class="panel-actions">
+                <button id="node-research-btn" class="node-btn research">Ask AI to Research</button>
+                <button id="node-save-btn" class="node-btn save">Save Changes</button>
+                <button id="node-delete-btn" class="node-btn delete">Delete Node</button>
+            </div>
+        </div>
+    </ag-sidebar>
 </div>

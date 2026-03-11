@@ -141,14 +141,50 @@ function initGraphViewEvents() {
     graphRenderer.onEdgeCreate = () => triggerGraphSave();
     graphRenderer.onSelect = (node) => {
         const sidebar = document.getElementById('node-edit-sidebar');
+        if (!sidebar) {
+            console.error('Graph sidebar not found!');
+            return;
+        }
         if (node) {
             sidebar.open();
-            document.getElementById('node-label').innerText = node.label;
-            document.getElementById('node-summary').value = node.summary || '';
+            const labelInput = document.getElementById('node-label-input');
+            const summaryArea = document.getElementById('node-summary');
+            const typeBadge = document.getElementById('node-type-badge');
+            const researchBtn = document.getElementById('node-research-btn');
+            const saveBtn = document.getElementById('node-save-btn');
+            const deleteBtn = document.getElementById('node-delete-btn');
+
+            if (labelInput) labelInput.value = node.label;
+            if (summaryArea) summaryArea.value = node.summary || '';
+
+            const isTopic = node.type === 'topic';
+            if (typeBadge) {
+                typeBadge.innerText = isTopic ? 'Topic' : 'Idea';
+                typeBadge.className = `type-badge ${node.type}`;
+            }
+
+            // Disable editing for topic nodes
+            if (labelInput) labelInput.readOnly = isTopic;
+            if (summaryArea) summaryArea.readOnly = isTopic;
+            if (researchBtn) researchBtn.classList.toggle('hidden', isTopic);
+            if (saveBtn) saveBtn.classList.toggle('hidden', isTopic);
+            if (deleteBtn) deleteBtn.classList.toggle('hidden', isTopic);
         } else {
             sidebar.close();
         }
     };
+
+    document.getElementById('node-delete-btn')?.addEventListener('click', () => {
+        if (graphRenderer.selectedNode && graphRenderer.selectedNode.type === 'idea') {
+            if (confirm(`Delete node "${graphRenderer.selectedNode.label}"?`)) {
+                graphEngine.nodes = graphEngine.nodes.filter(n => n.id !== graphRenderer.selectedNode.id);
+                graphEngine.edges = graphEngine.edges.filter(e => e.source !== graphRenderer.selectedNode.id && e.target !== graphRenderer.selectedNode.id);
+                triggerGraphSave();
+                document.getElementById('node-edit-sidebar').close();
+                graphRenderer.selectedNode = null;
+            }
+        }
+    });
 
     document.getElementById('graph-add-node')?.addEventListener('click', () => {
         const id = 'idea-' + Date.now();
@@ -172,6 +208,7 @@ function initGraphViewEvents() {
 
     document.getElementById('node-save-btn')?.addEventListener('click', () => {
         if (graphRenderer.selectedNode) {
+            graphRenderer.selectedNode.label = document.getElementById('node-label-input').value;
             graphRenderer.selectedNode.summary = document.getElementById('node-summary').value;
             triggerGraphSave();
             document.getElementById('node-edit-sidebar').close();
