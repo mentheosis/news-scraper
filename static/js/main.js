@@ -40,9 +40,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // Restore active digest if one was selected
                 if (state.topicSelectionHistory.length > 0) {
                     const activeTitle = state.topicSelectionHistory[0];
-                    const topic = state.allTopics.find(t => t.title === activeTitle);
-                    if (topic) {
-                        import('./api.js').then(m => m.generateDigest(topic.originalIndex, topic.title));
+                    const topicIdx = state.allTopics.findIndex(t => t.title === activeTitle);
+                    if (topicIdx !== -1) {
+                        import('./api.js').then(m => m.generateDigest(topicIdx, activeTitle));
                     }
                 }
             }
