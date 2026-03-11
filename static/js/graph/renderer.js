@@ -127,7 +127,9 @@ export class GraphRenderer {
 
     handleWheel(e) {
         e.preventDefault();
-        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        // More granular zoom for touchpads/smooth scrolling
+        const sensitivity = 0.001;
+        const delta = Math.exp(-e.deltaY * sensitivity);
         this.zoom *= delta;
         this.zoom = Math.max(0.1, Math.min(5, this.zoom));
     }
@@ -223,10 +225,15 @@ export class GraphRenderer {
             let baseColor, strokeColor;
             if (node.type === 'topic') {
                 baseColor = isSelected ? '#ffea00' : (isHovered ? '#f4e04d' : '#fff9c4'); // Pale Yellow
-                strokeColor = isSelected ? '#fff' : '#fbc02d';
+                strokeColor = '#fbc02d';
             } else {
                 baseColor = isSelected ? '#00b0ff' : (isHovered ? '#4fc3f7' : '#e1f5fe'); // Pale Blue
-                strokeColor = isSelected ? '#fff' : '#0288d1';
+                strokeColor = '#0288d1';
+            }
+
+            if (isSelected) {
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = strokeColor;
             }
 
             ctx.fillStyle = baseColor;
@@ -235,6 +242,9 @@ export class GraphRenderer {
             ctx.lineWidth = isSelected ? 3 : 2;
             ctx.stroke();
 
+            // Reset shadow
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = 'transparent';
             // Label - Wrapped and Centered
             ctx.fillStyle = '#161b22'; // Dark text for pale bubbles
             ctx.font = '10px Inter';
