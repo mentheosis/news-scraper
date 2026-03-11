@@ -351,3 +351,138 @@ export async function researchNode(label) {
         return "Failed to research topic: " + err.message;
     }
 }
+
+export async function fetchManualTopics() {
+    const list = document.getElementById('manual-topic-list');
+    const loading = document.getElementById('loading-manual-topics');
+    const error = document.getElementById('error-manual-topics');
+
+    if (list) list.classList.add('hidden');
+    if (error) error.classList.add('hidden');
+    if (loading) loading.classList.remove('hidden');
+
+    try {
+        const res = await fetch('/api/topics/manual');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const topics = await res.json();
+
+        if (loading) loading.classList.add('hidden');
+        if (list) {
+            list.innerHTML = '';
+            if (topics.length === 0) {
+                list.innerHTML = '<li class="empty-list">No manual topics found on graph.</li>';
+            } else {
+                topics.forEach(topic => {
+                    const li = document.createElement('li');
+                    li.className = 'topic-card';
+                    li.innerHTML = `
+                        <h4>${topic.label}</h4>
+                        <p class="desc">${topic.summary || 'No summary available.'}</p>
+                    `;
+                    li.addEventListener('click', () => {
+                        document.querySelectorAll('#manual-topic-list .topic-card').forEach(c => c.classList.remove('active'));
+                        li.classList.add('active');
+                        // Show config area
+                        const configArea = document.getElementById('custom-digest-config');
+                        const emptyState = document.getElementById('empty-state');
+                        if (configArea) configArea.classList.remove('hidden');
+                        if (emptyState) emptyState.classList.add('hidden');
+
+                        document.getElementById('selected-topic-title').innerText = topic.label;
+                        document.getElementById('selected-topic-summary').innerText = topic.summary || '';
+                        state.selectedManualTopic = topic;
+                    });
+                    list.appendChild(li);
+                });
+            }
+            list.classList.remove('hidden');
+        }
+    } catch (err) {
+        console.error("fetchManualTopics error:", err);
+        if (loading) loading.classList.add('hidden');
+        if (error) error.classList.remove('hidden');
+    }
+}
+
+export async function generateManualTopicDigest(topicId, customPrompt) {
+    const loading = document.getElementById('loading-digest');
+    const digestView = document.getElementById('digest-view');
+    const contentBox = document.getElementById('digest-content');
+    const titleBox = document.getElementById('digest-title');
+    const configArea = document.getElementById('custom-digest-config');
+    const statusText = document.getElementById('loading-status-text');
+
+    if (configArea) configArea.classList.add('hidden');
+    if (loading) loading.classList.remove('hidden');
+    if (digestView) digestView.classList.add('hidden');
+    if (contentBox) contentBox.innerHTML = '';
+
+    try {
+        const res = await fetch('/api/topics/manual/digest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topicId, customPrompt })
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split('\n\n');
+            buffer = events.pop();
+
+            for (const rawEvent of events) {
+                if (!rawEvent.trim()) continue;
+                const lines = rawEvent.split('\n');
+                let eventType = 'message';
+                let dataStr = '';
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) eventType = line.replace('event: ', '').trim();
+                    else if (line.startsWith('data: ')) dataStr = line.replace('data: ', '').trim();
+                }
+
+                if (dataStr) {
+                    const data = JSON.parse(dataStr);
+                    if (eventType === 'progress') {
+                        if (statusText) statusText.innerText = data.message;
+                    } else if (eventType === 'error') {
+                        throw new Error(data.message || "Failed to generate digest");
+                    } else if (eventType === 'result') {
+                        if (titleBox) titleBox.innerText = `Research: ${state.selectedManualTopic.label}`;
+                        if (contentBox) contentBox.innerHTML = marked.parse(data.digest);
+
+                        // Handle sources if returned
+                        if (data.articles) {
+                            renderSourceArticles(data.articles);
+                            state.currentArticles = data.articles;
+                            bindCitationLinks(data.articles);
+                        }
+
+                        if (loading) loading.classList.add('hidden');
+                        if (digestView) digestView.classList.remove('hidden');
+
+                        // Show headers sidebar
+                        const navSidebar = document.getElementById('headers-sidebar');
+                        if (navSidebar) {
+                            if (navSidebar.tagName.toLowerCase() === 'ag-sidebar') navSidebar.open();
+                            else navSidebar.classList.remove('collapsed');
+                            document.getElementById('btn-show-headers')?.classList.add('active');
+                        }
+                        renderHeaderNav(data.digest);
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        console.error("generateManualTopicDigest error:", err);
+        if (loading) loading.classList.add('hidden');
+        if (configArea) configArea.classList.remove('hidden');
+        alert("Failed to generate digest: " + err.message);
+    }
+}

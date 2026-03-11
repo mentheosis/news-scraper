@@ -8,12 +8,13 @@ import (
 )
 
 type GraphNode struct {
-	ID      string  `json:"id"`
-	Type    string  `json:"type"` // "topic" or "idea"
-	Label   string  `json:"label"`
-	Summary string  `json:"summary"`
-	X       float64 `json:"x,omitempty"`
-	Y       float64 `json:"y,omitempty"`
+	ID           string  `json:"id"`
+	Type         string  `json:"type"` // "topic", "idea", or "Daily News"
+	Label        string  `json:"label"`
+	Summary      string  `json:"summary"`
+	ArticleCount int     `json:"articleCount"`
+	X            float64 `json:"x,omitempty"`
+	Y            float64 `json:"y,omitempty"`
 }
 
 type GraphEdge struct {

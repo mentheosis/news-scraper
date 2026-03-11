@@ -42,11 +42,11 @@ export class GraphRenderer {
     }
 
     getNodeRadius(node) {
-        if (node.type === 'topic' && node.articleCount) {
+        if ((node.type === 'Topic' || node.type === 'Daily News') && node.articleCount > 0) {
             // Sub-linear growth: base 30 + 5 * sqrt(count)
             return 30 + Math.sqrt(node.articleCount) * 5;
         }
-        return 30; // Default for ideas
+        return 30; // Default for Idea and nodes without articles
     }
 
     handleMouseDown(e) {
@@ -223,11 +223,15 @@ export class GraphRenderer {
 
             // Color logic
             let baseColor, strokeColor;
-            if (node.type === 'topic') {
-                baseColor = isSelected ? '#ffea00' : (isHovered ? '#f4e04d' : '#fff9c4'); // Pale Yellow
+            if (node.type === 'Topic') {
+                baseColor = isSelected ? '#ffea00' : (isHovered ? '#fff176' : '#fff59d'); // Yellow 300/400/200
                 strokeColor = '#fbc02d';
+            } else if (node.type === 'Daily News') {
+                baseColor = isSelected ? '#aeea00' : (isHovered ? '#a5d6a7' : '#c8e6c9'); // Green 300/200/100
+                strokeColor = '#7cb342';
             } else {
-                baseColor = isSelected ? '#00b0ff' : (isHovered ? '#4fc3f7' : '#e1f5fe'); // Pale Blue
+                // Idea or unknown
+                baseColor = isSelected ? '#00b0ff' : (isHovered ? '#90caf9' : '#bbdefb'); // Blue 300/200/100
                 strokeColor = '#0288d1';
             }
 

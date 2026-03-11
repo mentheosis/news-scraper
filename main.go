@@ -33,6 +33,8 @@ func main() {
 	mux.HandleFunc("/api/hot-take", appState.HandleHotTake)
 	mux.HandleFunc("/api/graph", appState.HandleGetGraph)
 	mux.HandleFunc("/api/graph/save", appState.HandleSaveGraph)
+	mux.HandleFunc("/api/topics/manual", appState.HandleGetManualTopics)
+	mux.HandleFunc("/api/topics/manual/digest", appState.HandleManualTopicDigest)
 	mux.HandleFunc("/api/research", appState.HandleNodeResearch)
 
 	// 2. Serve static files (HTML, CSS, JS)

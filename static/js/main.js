@@ -1,4 +1,4 @@
-import { fetchDates, fetchTopics, fetchHotTake, fetchGraph, saveGraph } from './api.js';
+import { fetchDates, fetchTopics, fetchHotTake, fetchGraph, saveGraph, fetchManualTopics, generateManualTopicDigest } from './api.js';
 import { getLocalYYYYMMDD } from './utils.js';
 import { toggleSidebar, closeSidebar, renderTopics, renderFeedHealth } from './ui.js';
 import { setSort, state } from './state.js';
@@ -20,6 +20,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const view = e.detail.view;
         if (view === 'news' && activeView !== 'news') {
             viewLoader.load('news-feed');
+        } else if (view === 'topics' && activeView !== 'topics') {
+            viewLoader.load('topics-view');
         } else if (view === 'graph' && activeView !== 'graph') {
             viewLoader.load('graph-view');
         }
@@ -28,17 +30,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // View Loaded Handler
     document.addEventListener('view-loaded', (e) => {
         const viewName = e.detail.view;
-        activeView = viewName === 'news-feed' ? 'news' : 'graph';
 
         if (viewName === 'news-feed') {
-            fetchDates(); // Populate the dropdown
+            activeView = 'news';
+            fetchDates();
             initNewsFeedEvents();
             if (state.allTopics && state.allTopics.length > 0) {
                 renderTopics(state.allTopics);
-                // Also restore feed health if available
                 if (state.feedHealth) renderFeedHealth(state.feedHealth);
-
-                // Restore active digest if one was selected
                 if (state.topicSelectionHistory.length > 0) {
                     const activeTitle = state.topicSelectionHistory[0];
                     const topicIdx = state.allTopics.findIndex(t => t.title === activeTitle);
@@ -47,7 +46,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
             }
+        } else if (viewName === 'topics-view') {
+            activeView = 'topics';
+            fetchManualTopics();
+            initTopicsEvents();
         } else if (viewName === 'graph-view') {
+            activeView = 'graph';
             initGraphViewEvents();
             syncTopicsToGraph();
         }
@@ -139,6 +143,28 @@ function initNewsFeedEvents() {
     });
 }
 
+function initTopicsEvents() {
+    document.getElementById('btn-show-topics')?.addEventListener('click', () => toggleSidebar('sidebar', 'btn-show-topics'));
+    document.getElementById('btn-show-headers')?.addEventListener('click', () => toggleSidebar('headers-sidebar', 'btn-show-headers'));
+    document.getElementById('btn-show-sources')?.addEventListener('click', () => toggleSidebar('right-sidebar', 'btn-show-sources'));
+
+    document.getElementById('collapse-topics-btn')?.addEventListener('click', () => toggleSidebar('sidebar', 'btn-show-topics'));
+    document.getElementById('collapse-headers-btn')?.addEventListener('click', () => toggleSidebar('headers-sidebar', 'btn-show-headers'));
+
+    document.getElementById('generate-manual-digest-btn')?.addEventListener('click', () => {
+        const prompt = document.getElementById('custom-prompt-input').value.trim();
+        if (state.selectedManualTopic && prompt) {
+            generateManualTopicDigest(state.selectedManualTopic.id, prompt);
+        } else {
+            alert("Please select a topic and enter instructions.");
+        }
+    });
+
+    document.getElementById('retry-fetch-manual-topics')?.addEventListener('click', () => {
+        fetchManualTopics();
+    });
+}
+
 function initGraphViewEvents() {
     const canvas = document.getElementById('graph-canvas');
     if (!canvas) return;
@@ -165,7 +191,7 @@ function initGraphViewEvents() {
             if (summaryArea) summaryArea.value = node.summary || '';
 
             if (articleCountLabel) {
-                if (node.type === 'topic' && node.articleCount > 0) {
+                if ((node.type === 'Topic' || node.type === 'Daily News') && node.articleCount > 0) {
                     articleCountLabel.innerText = `${node.articleCount} articles`;
                     articleCountLabel.classList.remove('hidden');
                 } else {
@@ -173,25 +199,51 @@ function initGraphViewEvents() {
                 }
             }
 
-            const isTopic = node.type === 'topic';
+            const isTopic = node.type === 'Topic';
+            const isDailyNews = node.type === 'Daily News';
+
             if (typeBadge) {
-                typeBadge.innerText = isTopic ? 'Topic' : 'Idea';
-                typeBadge.className = `type-badge ${node.type}`;
+                typeBadge.innerText = node.type;
+                typeBadge.className = `type-badge ${node.type.replace(/\s+/g, '-')}`;
+                typeBadge.style.cursor = isDailyNews ? 'default' : 'pointer';
+
+                // Remove old listeners to avoid stacking
+                const newBadge = typeBadge.cloneNode(true);
+                typeBadge.parentNode.replaceChild(newBadge, typeBadge);
+
+                if (!isDailyNews) {
+                    newBadge.addEventListener('click', () => {
+                        node.type = node.type === 'Topic' ? 'Idea' : 'Topic';
+                        newBadge.innerText = node.type;
+                        newBadge.className = `type-badge ${node.type}`;
+
+                        // Update read-only states
+                        const isNowTopic = node.type === 'Topic';
+                        if (labelInput) labelInput.readOnly = isNowTopic;
+                        if (summaryArea) summaryArea.readOnly = isNowTopic;
+                        if (researchBtn) researchBtn.classList.toggle('hidden', isNowTopic);
+                        if (saveBtn) saveBtn.classList.toggle('hidden', isNowTopic);
+                        if (deleteBtn) deleteBtn.classList.toggle('hidden', isNowTopic);
+
+                        triggerGraphSave();
+                    });
+                }
             }
 
-            // Disable editing for topic nodes
-            if (labelInput) labelInput.readOnly = isTopic;
-            if (summaryArea) summaryArea.readOnly = isTopic;
-            if (researchBtn) researchBtn.classList.toggle('hidden', isTopic);
-            if (saveBtn) saveBtn.classList.toggle('hidden', isTopic);
-            if (deleteBtn) deleteBtn.classList.toggle('hidden', isTopic);
+            // Disable editing for topic and Daily News nodes
+            const isReadOnly = isTopic || isDailyNews;
+            if (labelInput) labelInput.readOnly = isReadOnly;
+            if (summaryArea) summaryArea.readOnly = isReadOnly;
+            if (researchBtn) researchBtn.classList.toggle('hidden', isReadOnly);
+            if (saveBtn) saveBtn.classList.toggle('hidden', isReadOnly);
+            if (deleteBtn) deleteBtn.classList.toggle('hidden', isReadOnly);
         } else {
             sidebar.close();
         }
     };
 
     document.getElementById('node-delete-btn')?.addEventListener('click', () => {
-        if (graphRenderer.selectedNode && graphRenderer.selectedNode.type === 'idea') {
+        if (graphRenderer.selectedNode && graphRenderer.selectedNode.type.toLowerCase() === 'idea') {
             if (confirm(`Delete node "${graphRenderer.selectedNode.label}"?`)) {
                 graphEngine.nodes = graphEngine.nodes.filter(n => n.id !== graphRenderer.selectedNode.id);
                 graphEngine.edges = graphEngine.edges.filter(e => e.source !== graphRenderer.selectedNode.id && e.target !== graphRenderer.selectedNode.id);
@@ -206,7 +258,7 @@ function initGraphViewEvents() {
         const id = 'idea-' + Date.now();
         graphEngine.addNode({
             id: id,
-            type: 'idea',
+            type: 'Idea',
             label: 'New Idea',
             summary: ''
         });
@@ -218,7 +270,7 @@ function initGraphViewEvents() {
         const x = (e.clientX - rect.left - graphRenderer.panX) / graphRenderer.zoom;
         const y = (e.clientY - rect.top - graphRenderer.panY) / graphRenderer.zoom;
         const id = 'idea-' + Date.now();
-        graphEngine.addNode({ id, type: 'idea', label: 'New Idea', summary: '', x, y });
+        graphEngine.addNode({ id, type: 'Idea', label: 'New Idea', summary: '', x, y });
         triggerGraphSave();
     });
 
@@ -286,7 +338,7 @@ function syncTopicsToGraph() {
         if (!existing) {
             graphEngine.addNode({
                 id: topic.title,
-                type: 'topic',
+                type: 'Daily News',
                 label: topic.title,
                 summary: topic.description,
                 articleCount: count

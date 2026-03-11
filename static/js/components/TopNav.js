@@ -54,6 +54,7 @@ export class AgTopNav extends HTMLElement {
             </div>
             <div class="nav-links">
                 <div class="nav-item active" data-view="news">News Feed</div>
+                <div class="nav-item" data-view="topics">Topics</div>
                 <div class="nav-item" data-view="graph">Knowledge Graph</div>
             </div>
         `;

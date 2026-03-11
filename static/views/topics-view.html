@@ -1,0 +1,117 @@
+<div class="view-layout topics-layout">
+    <!-- Persistent Mini Strip for Navigation -->
+    <nav class="mini-strip" id="mini-strip">
+        <button class="nav-icon-btn active" id="btn-show-topics" title="Topics">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+        </button>
+        <button class="nav-icon-btn" id="btn-show-headers" title="Navigation">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+            </svg>
+        </button>
+        <button class="nav-icon-btn" id="btn-show-sources" title="Source Articles">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+            </svg>
+        </button>
+        <div class="spacer"></div>
+    </nav>
+
+    <!-- Main Sidebar: Manual Topics -->
+    <ag-sidebar id="sidebar" class="sidebar" width="320px" side="left">
+        <div slot="header" class="sidebar-header">
+            <div class="logo">
+                <button id="collapse-topics-btn" class="icon-btn-small" title="Collapse Sidebar">◀</button>
+                <span class="logo-text">Knowledge Topics</span>
+            </div>
+            <p class="subtitle">Manually created nodes from graph</p>
+        </div>
+        <div slot="body" class="topics-container">
+            <div id="loading-manual-topics" class="loading-state">
+                <div class="spinner"></div>
+                <p>Loading topics from graph...</p>
+            </div>
+            <ul id="manual-topic-list" class="topic-list hidden"></ul>
+            <div id="error-manual-topics" class="error-state hidden">
+                <p>Failed to load manual topics.</p>
+                <button class="retry-btn" id="retry-fetch-manual-topics">Try Again</button>
+            </div>
+        </div>
+    </ag-sidebar>
+
+    <!-- Navigation Sidebar: Headers -->
+    <ag-sidebar id="headers-sidebar" class="sidebar collapsed" width="320px" side="left">
+        <div slot="header" class="sidebar-header">
+            <div class="logo">
+                <button id="collapse-headers-btn" class="icon-btn-small">◀</button>
+                <span class="logo-text">Navigation</span>
+            </div>
+        </div>
+        <div slot="body" class="nav-hierarchy-container">
+            <ul id="header-nav-list" class="header-nav-list"></ul>
+        </div>
+    </ag-sidebar>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+        <div id="empty-state" class="empty-state">
+            <div class="welcome-icon">🔍</div>
+            <h2>Select a manual topic to research</h2>
+            <p>I will scan the entire article archive and synthesize a digest based on your custom instructions.</p>
+        </div>
+
+        <div id="custom-digest-config" class="custom-digest-config hidden">
+            <header class="config-header">
+                <h2 id="selected-topic-title">Topic Name</h2>
+                <p id="selected-topic-summary" class="subtitle">Topic summary...</p>
+            </header>
+
+            <div class="prompt-input-area">
+                <label for="custom-prompt-input">Custom Digest Instructions:</label>
+                <textarea id="custom-prompt-input" class="prompt-textarea"
+                    placeholder="e.g., Summarize the economic impact and mention key companies involved. Focus on trends from the last week."></textarea>
+
+                <div class="config-actions">
+                    <button id="generate-manual-digest-btn" class="primary-btn">
+                        <span class="btn-icon">⚡</span> Generate Research Digest
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="loading-digest" class="loading-state hidden">
+            <div class="pulse-ring"></div>
+            <h2 id="loading-title">Scanning Archives...</h2>
+            <p class="loading-meta" id="loading-status-text">Identifying relevant articles...</p>
+        </div>
+
+        <div id="digest-view" class="digest-view hidden">
+            <header class="digest-header">
+                <h1 id="digest-title">Research Digest</h1>
+                <div class="digest-meta">
+                    <span id="digest-topic-tag" class="topic-tag">Topic</span>
+                </div>
+            </header>
+            <div id="digest-content" class="markdown-body"></div>
+        </div>
+    </main>
+
+    <!-- Right Sidebar: Sources -->
+    <ag-sidebar id="right-sidebar" class="right-sidebar collapsed" width="340px" side="right">
+        <div slot="header" class="sidebar-header">
+            <h3>Source Articles</h3>
+            <p class="subtitle" id="source-count">0 articles processed</p>
+        </div>
+        <div slot="body" class="sources-container">
+            <ul id="source-list-panel" class="source-list-panel"></ul>
+        </div>
+    </ag-sidebar>
+</div>

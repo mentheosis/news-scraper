@@ -8,7 +8,8 @@ export const state = {
     topicSelectionHistory: [],
     allTopics: [],
     lastSkippedArticles: [],
-    targetDate: ''
+    targetDate: '',
+    selectedManualTopic: null
 };
 
 export function setSort(type) {
