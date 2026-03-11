@@ -27,6 +27,9 @@ func main() {
 	mux.HandleFunc("/api/digest", appState.HandleGenerateDigest)
 	mux.HandleFunc("/api/dates", appState.HandleListDates)
 	mux.HandleFunc("/api/hot-take", appState.HandleHotTake)
+	mux.HandleFunc("/api/graph", appState.HandleGetGraph)
+	mux.HandleFunc("/api/graph/save", appState.HandleSaveGraph)
+	mux.HandleFunc("/api/research", appState.HandleNodeResearch)
 
 	// 2. Serve static files (HTML, CSS, JS)
 	fs := http.FileServer(http.Dir("./static"))

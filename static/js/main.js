@@ -1,0 +1,231 @@
+import { fetchDates, fetchTopics, fetchHotTake, fetchGraph, saveGraph } from './api.js';
+import { getLocalYYYYMMDD } from './utils.js';
+import { toggleSidebar, closeSidebar, renderTopics, renderFeedHealth } from './ui.js';
+import { setSort, state } from './state.js';
+import { GraphEngine } from './graph/engine.js';
+import { GraphRenderer } from './graph/renderer.js';
+import { ViewLoader } from './views/ViewLoader.js';
+import './components/Sidebar.js';
+import './components/TopNav.js';
+
+let graphEngine, graphRenderer;
+let activeView = 'news';
+let viewLoader;
+
+document.addEventListener('DOMContentLoaded', async () => {
+    viewLoader = new ViewLoader('view-container');
+
+    // Global App Initialized
+    // (Wait for initial view load before fetching page-specific data)
+
+    // Initialize Graph Engine Early
+    graphEngine = new GraphEngine();
+    const persistedGraph = await fetchGraph();
+    if (persistedGraph && persistedGraph.nodes) {
+        persistedGraph.nodes.forEach(n => graphEngine.addNode(n));
+        persistedGraph.edges.forEach(e => graphEngine.addEdge(e.source, e.target));
+    }
+
+    // Initial View Load
+    await viewLoader.load('news-feed');
+
+    // Fetch topics/dates after view is loaded
+    fetchDates();
+    fetchTopics(false, getLocalYYYYMMDD());
+
+    // Navigation Listener
+    document.addEventListener('view-change', (e) => {
+        const view = e.detail.view;
+        if (view === 'news') {
+            viewLoader.load('news-feed');
+        } else if (view === 'graph') {
+            viewLoader.load('graph-view');
+        }
+    });
+
+    // View Loaded Handler
+    document.addEventListener('view-loaded', (e) => {
+        const viewName = e.detail.view;
+        activeView = viewName === 'news-feed' ? 'news' : 'graph';
+
+        if (viewName === 'news-feed') {
+            initNewsFeedEvents();
+            if (state.allTopics) renderTopics(state.allTopics);
+            if (state.feedHealth) renderFeedHealth(state.feedHealth);
+        } else if (viewName === 'graph-view') {
+            initGraphViewEvents();
+            syncTopicsToGraph();
+        }
+    });
+
+    // Global Modal Listener
+    document.getElementById('close-hot-take')?.addEventListener('click', () => {
+        document.getElementById('hot-take-modal')?.classList.add('hidden');
+    });
+
+    // Auto-save graph periodically if in graph view
+    setInterval(() => {
+        if (graphEngine && graphEngine.nodes.length > 0) {
+            triggerGraphSave();
+        }
+    }, 10000); // Every 10 seconds
+});
+
+function triggerGraphSave() {
+    const data = {
+        nodes: graphEngine.nodes.map(n => ({
+            id: n.id,
+            type: n.type,
+            label: n.label,
+            summary: n.summary,
+            x: n.x,
+            y: n.y
+        })),
+        edges: graphEngine.edges.map(e => ({
+            source: e.sourceId || e.source,
+            target: e.targetId || e.target
+        }))
+    };
+    saveGraph(data);
+}
+
+function initNewsFeedEvents() {
+    document.getElementById('btn-show-topics')?.addEventListener('click', () => toggleSidebar('sidebar', 'btn-show-topics'));
+    document.getElementById('btn-show-headers')?.addEventListener('click', () => toggleSidebar('headers-sidebar', 'btn-show-headers'));
+    document.getElementById('btn-show-health')?.addEventListener('click', () => toggleSidebar('secondary-sidebar', 'btn-show-health'));
+    document.getElementById('btn-show-sources')?.addEventListener('click', () => toggleSidebar('right-sidebar', 'btn-show-sources'));
+
+    document.getElementById('collapse-topics-btn')?.addEventListener('click', () => toggleSidebar('sidebar', 'btn-show-topics'));
+    document.getElementById('collapse-headers-btn')?.addEventListener('click', () => toggleSidebar('headers-sidebar', 'btn-show-headers'));
+    document.getElementById('collapse-health-btn')?.addEventListener('click', () => toggleSidebar('secondary-sidebar', 'btn-show-health'));
+
+    document.getElementById('refresh-btn')?.addEventListener('click', () => {
+        const dateSelect = document.getElementById('news-date-select');
+        const today = getLocalYYYYMMDD();
+        fetchTopics(true, dateSelect.value || today);
+    });
+
+    document.getElementById('sort-num-btn')?.addEventListener('click', () => setSort('number'));
+    document.getElementById('sort-cite-btn')?.addEventListener('click', () => setSort('citations'));
+
+    document.querySelectorAll('.hot-take-btn.preset').forEach(btn => {
+        btn.addEventListener('click', () => fetchHotTake(btn.dataset.name));
+    });
+
+    document.getElementById('hot-take-custom-btn')?.addEventListener('click', () => {
+        const name = document.getElementById('hot-take-custom-input').value.trim();
+        if (name) fetchHotTake(name);
+    });
+
+    document.getElementById('retry-fetch-topics')?.addEventListener('click', () => {
+        const today = getLocalYYYYMMDD();
+        fetchTopics(false, today);
+    });
+}
+
+function initGraphViewEvents() {
+    const canvas = document.getElementById('graph-canvas');
+    if (!canvas) return;
+
+    graphRenderer = new GraphRenderer(canvas, graphEngine);
+    graphRenderer.onEdgeCreate = () => triggerGraphSave();
+    graphRenderer.onSelect = (node) => {
+        const sidebar = document.getElementById('node-edit-sidebar');
+        if (node) {
+            sidebar.open();
+            document.getElementById('node-label').innerText = node.label;
+            document.getElementById('node-summary').value = node.summary || '';
+        } else {
+            sidebar.close();
+        }
+    };
+
+    document.getElementById('graph-add-node')?.addEventListener('click', () => {
+        const id = 'idea-' + Date.now();
+        graphEngine.addNode({
+            id: id,
+            type: 'idea',
+            label: 'New Idea',
+            summary: ''
+        });
+        triggerGraphSave();
+    });
+
+    canvas.addEventListener('dblclick', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - graphRenderer.panX) / graphRenderer.zoom;
+        const y = (e.clientY - rect.top - graphRenderer.panY) / graphRenderer.zoom;
+        const id = 'idea-' + Date.now();
+        graphEngine.addNode({ id, type: 'idea', label: 'New Idea', summary: '', x, y });
+        triggerGraphSave();
+    });
+
+    document.getElementById('node-save-btn')?.addEventListener('click', () => {
+        if (graphRenderer.selectedNode) {
+            graphRenderer.selectedNode.summary = document.getElementById('node-summary').value;
+            triggerGraphSave();
+            document.getElementById('node-edit-sidebar').close();
+            graphRenderer.selectedNode = null;
+        }
+    });
+
+    document.getElementById('node-research-btn')?.addEventListener('click', async () => {
+        if (graphRenderer.selectedNode) {
+            const btn = document.getElementById('node-research-btn');
+            const summaryArea = document.getElementById('node-summary');
+            const originalText = btn.innerText;
+            btn.innerText = 'Researching...';
+            btn.disabled = true;
+
+            const result = await import('./api.js').then(m => m.researchNode(graphRenderer.selectedNode.label));
+            summaryArea.value = result;
+            graphRenderer.selectedNode.summary = result;
+            triggerGraphSave();
+
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById('close-node-edit')?.addEventListener('click', () => {
+        document.getElementById('node-edit-sidebar').close();
+        graphRenderer.selectedNode = null;
+    });
+
+    document.getElementById('graph-zoom-in')?.addEventListener('click', () => graphRenderer.zoom *= 1.2);
+    document.getElementById('graph-zoom-out')?.addEventListener('click', () => graphRenderer.zoom /= 1.2);
+    document.getElementById('graph-reset')?.addEventListener('click', () => {
+        graphRenderer.zoom = 1;
+        graphRenderer.panX = 0;
+        graphRenderer.panY = 0;
+    });
+
+    if (!window._graphLoopRunning) {
+        window._graphLoopRunning = true;
+        const loop = () => {
+            if (activeView === 'graph') {
+                graphEngine.update();
+                graphRenderer.draw();
+            }
+            requestAnimationFrame(loop);
+        };
+        loop();
+    }
+}
+
+function syncTopicsToGraph() {
+    if (!state.allTopics || !graphEngine) return;
+    let added = false;
+    state.allTopics.forEach(topic => {
+        if (!graphEngine.nodes.find(n => n.id === topic.title)) {
+            graphEngine.addNode({
+                id: topic.title,
+                type: 'topic',
+                label: topic.title,
+                summary: topic.description
+            });
+            added = true;
+        }
+    });
+    if (added) triggerGraphSave();
+}
