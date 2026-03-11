@@ -31,7 +31,12 @@ export function closeSidebar(sidebarId, btnId) {
 
 export function renderTopics(topics) {
     const list = document.getElementById('topic-list');
+    const loadingState = document.getElementById('loading-topics');
+    if (!list) return;
+
     list.innerHTML = '';
+    if (loadingState) loadingState.classList.add('hidden');
+    list.classList.remove('hidden');
 
     if (!topics || topics.length === 0) {
         list.innerHTML = `<li class="empty-list">No major topics found today.</li>`;
