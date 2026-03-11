@@ -52,8 +52,8 @@ body {
 /* FAB Button */
 .fab-btn {
     position: absolute;
-    bottom: 30px;
-    right: 30px;
+    top: 20px;
+    left: 20px;
     width: 56px;
     height: 56px;
     border-radius: 28px;
@@ -1012,12 +1012,26 @@ body {
     background: transparent;
     border: none;
     color: #fff;
-    font-size: 16px;
+    font-size: 1.2rem;
     font-weight: 700;
-    padding: 0;
-    margin: 0;
     width: 100%;
     outline: none;
+    margin-bottom: 4px;
+}
+
+.node-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.node-meta-item {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
 }
 
 .node-label-input[readonly] {
