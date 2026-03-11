@@ -380,7 +380,7 @@ func (app *AppState) HandleGenerateDigest(w http.ResponseWriter, r *http.Request
 
 	var filteredArticles []ingest.ArticleSummary
 	for _, a := range selectedCluster.Articles {
-		if a.FetchDate == "" || a.FetchDate == targetDate {
+		if a.FetchDate == "" || strings.HasPrefix(a.FetchDate, targetDate) {
 			filteredArticles = append(filteredArticles, a)
 		}
 	}

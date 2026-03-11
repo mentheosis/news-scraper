@@ -50,7 +50,8 @@ export class AgTopNav extends HTMLElement {
                 }
             </style>
             <div class="logo">
-                <span style="font-size: 24px;">📰</span> AgNews
+                <img src="/cat-moar-smallw.png" width="110" height="55" alt="Moar Cat" />
+                AgNews
             </div>
             <div class="nav-links">
                 <div class="nav-item active" data-view="news">News Feed</div>
