@@ -7,7 +7,8 @@ export const state = {
     currentDigestMarkdown: '',
     topicSelectionHistory: [],
     allTopics: [],
-    lastSkippedArticles: []
+    lastSkippedArticles: [],
+    targetDate: ''
 };
 
 export function setSort(type) {

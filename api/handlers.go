@@ -121,6 +121,7 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 				s.TotalDiscovered = gStat.TotalDiscovered
 				s.TotalCompressed = gStat.TotalCompressed
 				s.RecentCount = gStat.RecentCount
+				s.SourceBreakdown = gStat.SourceBreakdown
 				feedStats[name] = s
 			}
 
@@ -241,6 +242,7 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 		s.TotalDiscovered = gStat.TotalDiscovered
 		s.TotalCompressed = gStat.TotalCompressed
 		s.RecentCount = gStat.RecentCount
+		s.SourceBreakdown = gStat.SourceBreakdown
 		feedStats[name] = s
 	}
 

@@ -249,6 +249,17 @@ func GetGlobalFeedStats() map[string]ingest.FeedStatus {
 			s.TotalCompressed++
 		}
 
+		if source == "Unknown" && art.Link != "" {
+			if s.SourceBreakdown == nil {
+				s.SourceBreakdown = make(map[string]int)
+			}
+			domain := "unknown-domain"
+			if u, err := url.Parse(art.Link); err == nil && u.Host != "" {
+				domain = strings.TrimPrefix(u.Host, "www.")
+			}
+			s.SourceBreakdown[domain]++
+		}
+
 		fetchTime := parseFetchDate(art.FetchDate)
 		if !fetchTime.IsZero() && now.Sub(fetchTime) < 24*time.Hour {
 			s.RecentCount++

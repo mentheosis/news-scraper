@@ -28,7 +28,8 @@ export async function fetchDates() {
             select.appendChild(opt);
         });
 
-        select.value = today;
+        if (!state.targetDate) state.targetDate = today;
+        select.value = state.targetDate;
     } catch (err) {
         console.error("Failed to fetch dates:", err);
     }
@@ -44,8 +45,9 @@ export async function fetchTopics(isRefresh = true, targetDate = '') {
     const today = getLocalYYYYMMDD();
     if (!targetDate) {
         const dateSelect = document.getElementById('news-date-select');
-        targetDate = dateSelect ? dateSelect.value : today;
+        targetDate = dateSelect ? dateSelect.value : (state.targetDate || today);
     }
+    state.targetDate = targetDate;
 
     if (topicsHeader) {
         topicsHeader.classList.toggle('hidden', targetDate !== today);
