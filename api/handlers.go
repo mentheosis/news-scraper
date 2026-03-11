@@ -104,6 +104,7 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 					cachedArticles[i] = services.CachedArticle{Link: a.Link}
 				}
 				c.HasCachedDigest = services.IsDigestCached(cachedArticles)
+				c.Type = "Daily News"
 
 				for _, a := range c.Articles {
 					if s, ok := feedStats[a.SourceName]; ok {
@@ -226,6 +227,7 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 			cachedArticles[i] = services.CachedArticle{Link: a.Link}
 		}
 		c.HasCachedDigest = services.IsDigestCached(cachedArticles)
+		c.Type = "Daily News"
 	}
 
 	if err := services.SaveClustersCache(targetDate, clusters); err != nil {
@@ -575,6 +577,94 @@ func (app *AppState) HandleSaveGraph(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+}
+
+// HandleGetManualTopics returns nodes of type "topic" from the knowledge graph.
+func (app *AppState) HandleGetManualTopics(w http.ResponseWriter, r *http.Request) {
+	graph, err := services.LoadGraph()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var topics []services.GraphNode
+	for _, node := range graph.Nodes {
+		if node.Type == "Topic" {
+			topics = append(topics, node)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(topics)
+}
+
+// HandleManualTopicDigest handles the custom digestion of manual topics.
+func (app *AppState) HandleManualTopicDigest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		TopicID      string `json:"topicId"`
+		CustomPrompt string `json:"customPrompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, _ := w.(http.Flusher)
+
+	send := func(event string, data interface{}) {
+		b, _ := json.Marshal(data)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	// 1. Get Topic Label
+	graph, _ := services.LoadGraph()
+	var topicLabel string
+	for _, n := range graph.Nodes {
+		if n.ID == body.TopicID {
+			topicLabel = n.Label
+			break
+		}
+	}
+	if topicLabel == "" {
+		send("error", map[string]string{"message": "Topic not found"})
+		return
+	}
+
+	send("progress", map[string]string{"message": "Scanning all cached articles..."})
+
+	// 2. Load all articles
+	articles, err := services.ListAllCachedArticles()
+	if err != nil {
+		send("error", map[string]string{"message": "Failed to load articles"})
+		return
+	}
+
+	// 3. Filter for relevance (Simplified for now - can be enhanced with batches)
+	send("progress", map[string]string{"message": fmt.Sprintf("Checking %d articles for relevance to '%s'...", len(articles), topicLabel)})
+
+	// We'll use a service function to handle relevance and digestion
+	digest, relevantArticles, err := services.GenerateManualDigest(ctx, topicLabel, body.CustomPrompt, articles)
+	if err != nil {
+		send("error", map[string]string{"message": err.Error()})
+		return
+	}
+
+	send("result", map[string]interface{}{
+		"digest":   digest,
+		"articles": relevantArticles,
+	})
 }
 
 // HandleNodeResearch uses Gemini to do a deep dive on a specific node label.

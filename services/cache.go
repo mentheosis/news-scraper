@@ -331,6 +331,34 @@ func MigrateArticleCache() {
 	}
 }
 
+// ListAllCachedArticles returns a list of all articles stored in the centralized cache.
+func ListAllCachedArticles() ([]CachedArticle, error) {
+	articleDir := filepath.Join(".", ".cache", "articles")
+	entries, err := os.ReadDir(articleDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var articles []CachedArticle
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		path := filepath.Join(articleDir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		var art CachedArticle
+		if err := json.Unmarshal(data, &art); err == nil {
+			articles = append(articles, art)
+		}
+	}
+	return articles, nil
+}
+
 func inferSourceName(link string) string {
 	u, err := url.Parse(link)
 	if err != nil {

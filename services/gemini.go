@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kdub/ag_news/ingest"
 	"google.golang.org/genai"
 )
 
@@ -194,6 +195,79 @@ func GenerateHotTake(ctx context.Context, name string, digest string) (string, e
 	}
 
 	return resp.Candidates[0].Content.Parts[0].Text, nil
+}
+
+// GenerateManualDigest identifies relevant articles and generates a custom digest for a manual topic.
+func GenerateManualDigest(ctx context.Context, topicLabel, customPrompt string, allArticles []CachedArticle) (string, []ingest.ArticleSummary, error) {
+	client, err := GetGeminiClient(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// 1. Filter articles for relevance using LLM
+	// To be efficient, we'll first do a simple string match or vector search, but here we'll use LLM for precision on a subset or batch.
+	// For now, let's pick articles that mention the topic in title or summary for a first pass, then ask LLM.
+	var candidates []CachedArticle
+	for _, a := range allArticles {
+		if strings.Contains(strings.ToLower(a.Title), strings.ToLower(topicLabel)) ||
+			strings.Contains(strings.ToLower(a.RSSSummary), strings.ToLower(topicLabel)) {
+			candidates = append(candidates, a)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return "No articles found in cache that are obviously relevant to this topic.", nil, nil
+	}
+
+	// 2. Refine relevance with LLM if there are many candidates (simplified for this step)
+	relevantArticles := candidates
+	if len(relevantArticles) > 20 {
+		relevantArticles = relevantArticles[:20] // Cap for now
+	}
+
+	// 3. Generate Digest with Custom Prompt
+	prompt := buildManualDigestPrompt(topicLabel, customPrompt, relevantArticles)
+
+	resp, err := client.Models.GenerateContent(ctx, "gemini-2.5-flash", genai.Text(prompt), nil)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to generate custom digest: %w", err)
+	}
+
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return "", nil, fmt.Errorf("no response generated")
+	}
+
+	digest := resp.Candidates[0].Content.Parts[0].Text
+
+	// Convert back to ArticleSummary for the frontend
+	var summaries []ingest.ArticleSummary
+	for _, a := range relevantArticles {
+		summaries = append(summaries, ingest.ArticleSummary{
+			SourceName:        a.SourceName,
+			Title:             a.Title,
+			Link:              a.Link,
+			Summary:           a.RSSSummary,
+			CompressedSummary: a.CompressedSummary,
+			Published:         a.Published,
+			FetchDate:         a.FetchDate,
+		})
+	}
+
+	return digest, summaries, nil
+}
+
+func buildManualDigestPrompt(topic, userPrompt string, articles []CachedArticle) string {
+	prompt := fmt.Sprintf("You are a research assistant. The user is interested in the topic: '%s'.\n", topic)
+	prompt += "Below are relevant articles from the news cache. Your task is to generate a digest according to the user's custom instructions.\n\n"
+	prompt += "--- USER CUSTOM INSTRUCTIONS ---\n"
+	prompt += userPrompt + "\n\n"
+	prompt += "--- ARTICLES ---\n"
+	for i, a := range articles {
+		prompt += fmt.Sprintf("[%d] %s (Source: %s)\nURL: %s\nSummary: %s\nFacts: %s\n\n", i+1, a.Title, a.SourceName, a.Link, a.RSSSummary, a.CompressedSummary)
+	}
+
+	prompt += "\nGuidelines:\n- Follow the user's instructions strictly.\n- Cite the articles by their index or URL.\n- Use Markdown for formatting."
+	return prompt
 }
 
 func buildPrompt(articles []CachedArticle, previousDigest string) string {

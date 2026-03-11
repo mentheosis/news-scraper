@@ -17,6 +17,7 @@ type TopicCluster struct {
 	SourceCounts    map[string]int          `json:"source_counts"`
 	Indices         []int                   `json:"article_indices"`
 	HasCachedDigest bool                    `json:"has_cached_digest"`
+	Type            string                  `json:"type"` // "Daily News" or "Topic"
 	Articles        []ingest.ArticleSummary `json:"articles"`
 }
 
