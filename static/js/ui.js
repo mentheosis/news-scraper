@@ -101,45 +101,75 @@ export function renderFeedHealth(stats) {
     list.innerHTML = '';
     if (!stats) return;
 
+    // Calculate totals
+    let totalDiscovered = 0;
+    let totalCompressed = 0;
+    let totalRecent = 0;
+    Object.values(stats).forEach(item => {
+        totalDiscovered += item.total_discovered || 0;
+        totalCompressed += item.total_compressed || 0;
+        totalRecent += item.recent_count || 0;
+    });
+
+    // Add Total Summary Card at top
+    const totalLi = document.createElement('li');
+    totalLi.className = 'source-article-card feed-health-card status-ok';
+    totalLi.style.padding = '10px 12px';
+    totalLi.style.background = 'rgba(255, 255, 255, 0.05)';
+    totalLi.style.border = '1px solid var(--border-color)';
+    totalLi.style.marginBottom = '12px';
+    totalLi.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="health-icon">📊</span> 
+            <strong style="font-size: 14px;">Global Cache Total</strong>
+        </div>
+        <div class="health-stats-grid" style="display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 11px; margin-top: 8px;">
+            <span style="color: var(--text-secondary)">Articles Discovered:</span>
+            <strong style="text-align: right">${totalDiscovered}</strong>
+            <span style="color: var(--text-secondary)">Summaries Compressed:</span>
+            <strong style="text-align: right">${totalCompressed}</strong>
+            <span style="color: var(--text-secondary)">New (Last 24h):</span>
+            <strong style="text-align: right">${totalRecent}</strong>
+        </div>
+    `;
+    list.appendChild(totalLi);
+
     Object.keys(stats).sort().forEach(source => {
         const item = stats[source];
         const hasError = !!item.error;
         let colorClass = 'status-ok';
         let icon = '✅';
 
-        let descParts = [];
+        const statsHtml = `
+            <div class="health-stats-grid" style="display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 11px; margin-top: 6px;">
+                <span style="color: var(--text-secondary)">Total History:</span>
+                <strong style="text-align: right">${item.total_discovered || 0}</strong>
+                <span style="color: var(--text-secondary)">Compressed:</span>
+                <strong style="text-align: right">${item.total_compressed || 0}</strong>
+                <span style="color: var(--text-secondary)">Last 24h:</span>
+                <strong style="text-align: right">${item.recent_count || 0}</strong>
+            </div>
+        `;
+
+        let runInfo = '';
         if (item.new_count > 0 || item.cached_count > 0) {
-            descParts.push(`${item.new_count || 0} new`);
-            descParts.push(`${item.cached_count || 0} cached`);
-        } else if (item.article_count > 0) {
-            descParts.push(`${item.article_count} item(s)`);
-        }
-
-        let desc = descParts.length > 0 ? descParts.join(' / ') : '0 articles found';
-
-        if (item.skipped_count > 0) {
-            desc += ` / <span style="color:#f85149; font-weight:bold;">${item.skipped_count} skipped</span>`;
-            if (colorClass === 'status-ok') colorClass = 'status-warn';
-            if (icon === '✅') icon = '⚠️';
-        }
-
-        if (hasError) {
-            colorClass = 'status-error';
-            icon = '❌';
-            desc = item.error;
-        } else if (item.article_count === 0 && item.cached_count === 0) {
-            colorClass = 'status-warn';
-            icon = '⚠️';
-            desc = '0 articles fetched';
+            runInfo = `<div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--border-color); font-size: 10px; opacity: 0.7;">
+                Latest: ${item.new_count || 0} new / ${item.cached_count || 0} cached
+            </div>`;
+        } else if (hasError) {
+            runInfo = `<div style="margin-top: 6px; color: #f85149; font-size: 11px;">${item.error}</div>`;
         }
 
         const li = document.createElement('li');
         li.className = `source-article-card feed-health-card ${colorClass}`;
+        li.style.padding = '8px 12px';
         li.innerHTML = `
-            <div class="col-meta">
-                <span class="health-icon">${icon}</span> <strong>${item.name}</strong>
+            <div class="col-meta" style="display: flex; align-items: center; gap: 8px;">
+                <span class="health-icon">${icon}</span> 
+                <strong style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.name}</strong>
             </div>
-            <div class="health-desc" style="margin-top:4px; font-size:12px; color:var(--text-secondary); word-break: break-all;">${desc}</div>
+            ${statsHtml}
+            ${runInfo}
         `;
         list.appendChild(li);
     });
