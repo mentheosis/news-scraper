@@ -11,6 +11,11 @@ export class GraphRenderer {
 
         this.setupListeners();
         this.resize();
+
+        // Use ResizeObserver for automatic handling of sidebar toggles
+        this.resizeObserver = new ResizeObserver(() => this.resize());
+        this.resizeObserver.observe(this.canvas);
+
         window.addEventListener('resize', () => this.resize());
     }
 
@@ -18,6 +23,7 @@ export class GraphRenderer {
         this.canvas.width = this.canvas.clientWidth * window.devicePixelRatio;
         this.canvas.height = this.canvas.clientHeight * window.devicePixelRatio;
         this.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        this.draw(); // Immediate re-draw after clearing to avoid flicker
     }
 
     setupListeners() {
@@ -37,13 +43,14 @@ export class GraphRenderer {
 
     handleMouseDown(e) {
         const pos = this.getMousePos(e);
-        this.selectedNode = this.engine.nodes.find(n => {
+        const nodeBelow = this.engine.nodes.find(n => {
             const dx = n.x - pos.x;
             const dy = n.y - pos.y;
             return Math.sqrt(dx * dx + dy * dy) < 30; // Node radius
         });
 
-        if (this.selectedNode) {
+        if (nodeBelow) {
+            this.selectedNode = nodeBelow;
             if (e.shiftKey) {
                 this.isConnecting = true;
                 this.connectFrom = this.selectedNode;
@@ -52,9 +59,9 @@ export class GraphRenderer {
                 this.onSelect?.(this.selectedNode);
             }
         } else {
+            // Clicked background - pan but don't deselect
             this.draggingCanvas = true;
             this.dragStart = { x: e.clientX - this.panX, y: e.clientY - this.panY };
-            this.onSelect?.(null);
         }
     }
 
