@@ -114,6 +114,7 @@ export async function fetchTopics(isRefresh = true, targetDate = '') {
                         return;
                     } else if (eventType === 'result') {
                         state.allTopics = data.clusters;
+                        state.feedHealth = data.feed_stats;
                         renderTopics(state.allTopics);
                         renderFeedHealth(data.feed_stats);
                         loadingState.classList.add('hidden');
@@ -227,7 +228,10 @@ export async function generateDigest(topicIdx, title) {
                             state.currentCitations = countCitations(data.digest, data.articles);
                             state.lastSkippedArticles = data.skipped_articles || [];
                             renderSourceArticles(state.lastSkippedArticles);
-                            if (data.feed_stats) renderFeedHealth(data.feed_stats);
+                            if (data.feed_stats) {
+                                state.feedHealth = data.feed_stats;
+                                renderFeedHealth(data.feed_stats);
+                            }
                             document.getElementById('right-sidebar')?.classList.remove('collapsed');
                             document.getElementById('btn-show-sources')?.classList.add('active');
                             bindCitationLinks(data.articles);

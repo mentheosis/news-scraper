@@ -9,7 +9,8 @@ export const state = {
     allTopics: [],
     lastSkippedArticles: [],
     targetDate: '',
-    selectedManualTopic: null
+    selectedManualTopic: null,
+    feedHealth: null
 };
 
 export function setSort(type) {
