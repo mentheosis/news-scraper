@@ -8,11 +8,15 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/kdub/ag_news/api"
+	"github.com/kdub/ag_news/services"
 )
 
 func main() {
 	// Attempt to load .env file, ignore error if it doesn't exist
 	_ = godotenv.Load()
+
+	// Migrate article cache to new schema
+	services.MigrateArticleCache()
 
 	if os.Getenv("GEMINI_API_KEY") == "" {
 		log.Println("WARNING: GEMINI_API_KEY is not set. Topics will fail to cluster.")

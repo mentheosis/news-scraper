@@ -113,6 +113,17 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			// Merge global stats
+			globalStats := services.GetGlobalFeedStats()
+			for name, gStat := range globalStats {
+				s := feedStats[name]
+				s.Name = name
+				s.TotalDiscovered = gStat.TotalDiscovered
+				s.TotalCompressed = gStat.TotalCompressed
+				s.RecentCount = gStat.RecentCount
+				feedStats[name] = s
+			}
+
 			app.Clusters = clusters
 			app.FeedStats = feedStats
 
@@ -183,7 +194,7 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 		if matchedName != "" {
 			stat := feedStatsFull[matchedName]
 			if !existingLinks[a.Link] {
-				a.FetchDate = targetDate // Set the date it was fetched
+				a.FetchDate = time.Now().Format(time.RFC3339) // Precise timestamp
 				newArticles = append(newArticles, a)
 				stat.NewCount++
 			}
@@ -221,6 +232,18 @@ func (app *AppState) HandleGetTopics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.Clusters = clusters
+
+	// Merge global stats
+	globalStats := services.GetGlobalFeedStats()
+	for name, gStat := range globalStats {
+		s := feedStats[name]
+		s.Name = name
+		s.TotalDiscovered = gStat.TotalDiscovered
+		s.TotalCompressed = gStat.TotalCompressed
+		s.RecentCount = gStat.RecentCount
+		feedStats[name] = s
+	}
+
 	app.FeedStats = feedStats
 
 	resp := TopicsResponse{

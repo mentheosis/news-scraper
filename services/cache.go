@@ -3,11 +3,13 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"net/url"
 	"os"
 	"path/filepath"
-
 	"regexp"
 	"sort"
+	"strings"
 
 	"time"
 
@@ -28,7 +30,7 @@ type CachedArticle struct {
 	Title             string     `json:"title"`
 	SourceName        string     `json:"source_name"`
 	RSSSummary        string     `json:"rss_summary"`
-	CompressedSummary string     `json:"compressed_summary"` // Gemini-extracted facts
+	CompressedSummary string     `json:"compressed_summary,omitempty"` // Gemini-extracted facts
 	Published         *time.Time `json:"published"`
 	FetchDate         string     `json:"fetch_date"`
 }
@@ -109,11 +111,26 @@ func SaveClustersCache(date string, clusters []*TopicCluster) error {
 
 // getArticleHash is defined in compression.go
 
+func parseFetchDate(dateStr string) time.Time {
+	// Try ISO format
+	t, err := time.Parse(time.RFC3339, dateStr)
+	if err == nil {
+		return t
+	}
+	// Try old YYYY-MM-DD
+	t, err = time.Parse("2006-01-02", dateStr)
+	if err == nil {
+		return t
+	}
+	// Fallback
+	return time.Time{}
+}
+
 func SaveArticleMetadata(a ingest.ArticleSummary) {
 	hash := getArticleHash(a.Link)
 	path := filepath.Join(".", ".cache", "articles", hash+".json")
 
-	// Load existing to preserve CompressedSummary if it exists
+	// Load existing to preserve CompressedSummary and validate FetchDate
 	var data CachedArticle
 	existing, err := os.ReadFile(path)
 	if err == nil {
@@ -125,7 +142,19 @@ func SaveArticleMetadata(a ingest.ArticleSummary) {
 	data.SourceName = a.SourceName
 	data.RSSSummary = a.Summary
 	data.Published = a.Published
-	data.FetchDate = a.FetchDate
+
+	// Update FetchDate only if it's new or being upgraded to precise format
+	if a.FetchDate != "" {
+		// If input is YYYY-MM-DD and we have a precise one already, don't downgrade
+		if len(a.FetchDate) == 10 && len(data.FetchDate) > 10 {
+			// keep precise
+		} else {
+			data.FetchDate = a.FetchDate
+		}
+	} else if data.FetchDate == "" {
+		data.FetchDate = time.Now().Format(time.RFC3339)
+	}
+
 	// If the input already has CompressedSummary, preserve it
 	if a.CompressedSummary != "" {
 		data.CompressedSummary = a.CompressedSummary
@@ -167,6 +196,9 @@ func LoadArticleMetadata(link string) (*ingest.ArticleSummary, error) {
 		return nil, err
 	}
 
+	// Backfill: If FetchDate is YYYY-MM-DD, upgrade it potentially
+	// But let's just use it as is for the struct, parseFetchDate handles the logic when needed
+
 	return &ingest.ArticleSummary{
 		SourceName:        cached.SourceName,
 		Title:             cached.Title,
@@ -176,6 +208,166 @@ func LoadArticleMetadata(link string) (*ingest.ArticleSummary, error) {
 		Published:         cached.Published,
 		FetchDate:         cached.FetchDate,
 	}, nil
+}
+
+// GetGlobalFeedStats aggregates statistics across all cached articles
+func GetGlobalFeedStats() map[string]ingest.FeedStatus {
+	stats := make(map[string]ingest.FeedStatus)
+	articleDir := filepath.Join(".", ".cache", "articles")
+
+	entries, err := os.ReadDir(articleDir)
+	if err != nil {
+		return stats
+	}
+
+	now := time.Now()
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		path := filepath.Join(articleDir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		var art CachedArticle
+		if err := json.Unmarshal(data, &art); err != nil {
+			continue
+		}
+
+		source := art.SourceName
+		if source == "" {
+			source = "Unknown"
+		}
+
+		s := stats[source]
+		s.Name = source
+		s.TotalDiscovered++
+		if art.CompressedSummary != "" {
+			s.TotalCompressed++
+		}
+
+		fetchTime := parseFetchDate(art.FetchDate)
+		if !fetchTime.IsZero() && now.Sub(fetchTime) < 24*time.Hour {
+			s.RecentCount++
+		}
+
+		stats[source] = s
+	}
+
+	return stats
+}
+
+// MigrateArticleCache performs schema updates on all cached articles
+func MigrateArticleCache() {
+	articleDir := filepath.Join(".", ".cache", "articles")
+	entries, err := os.ReadDir(articleDir)
+	if err != nil {
+		return
+	}
+
+	log.Printf("Starting article cache migration for %d files...", len(entries))
+	migratedCount := 0
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		path := filepath.Join(articleDir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		// Use a map to handle unknown fields during migration
+		var raw map[string]interface{}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			continue
+		}
+
+		changed := false
+
+		// 1. facts -> compressed_summary
+		if facts, ok := raw["facts"]; ok && facts != "" {
+			if cs, exists := raw["compressed_summary"]; !exists || cs == "" {
+				raw["compressed_summary"] = facts
+				delete(raw, "facts")
+				changed = true
+			}
+		}
+
+		// 2. infer source_name from link
+		if sn, ok := raw["source_name"]; !ok || sn == "" {
+			if link, ok := raw["link"].(string); ok && link != "" {
+				inferred := inferSourceName(link)
+				raw["source_name"] = inferred
+				changed = true
+			}
+		}
+
+		if changed {
+			b, _ := json.MarshalIndent(raw, "", "  ")
+			os.WriteFile(path, b, 0644)
+			migratedCount++
+		}
+	}
+
+	if migratedCount > 0 {
+		log.Printf("Migrated %d articles to new schema", migratedCount)
+	}
+}
+
+func inferSourceName(link string) string {
+	u, err := url.Parse(link)
+	if err != nil {
+		return "Unknown"
+	}
+	host := u.Host
+	if host == "" {
+		return "Unknown"
+	}
+
+	// Clean up common prefixes
+	host = strings.TrimPrefix(host, "www.")
+	host = strings.TrimPrefix(host, "edition.")
+	host = strings.TrimPrefix(host, "mobile.")
+
+	// Check Google News redirect links
+	if strings.Contains(host, "news.google.com") {
+		return "Unknown" // We can't easily resolve these without fetching
+	}
+
+	// Map common domains to friendly names
+	mapping := map[string]string{
+		"reuters.com":        "Reuters",
+		"apnews.com":         "Associated Press",
+		"bbc.co.uk":          "BBC News",
+		"bbc.com":            "BBC News",
+		"theguardian.com":    "The Guardian",
+		"militarytimes.com":  "Military Times",
+		"nytimes.com":        "NY Times",
+		"washingtonpost.com": "Washington Post",
+		"bloomberg.com":      "Bloomberg",
+		"edition.cnn.com":    "CNN",
+		"cnn.com":            "CNN",
+	}
+
+	// Direct match
+	if name, ok := mapping[host]; ok {
+		return name
+	}
+
+	// Check if any mapping domain is a suffix
+	for domain, name := range mapping {
+		if strings.HasSuffix(host, domain) {
+			return name
+		}
+	}
+
+	return host // Default to the domain name
 }
 
 // ListCacheDates returns a list of available date folders in sorted descending order
