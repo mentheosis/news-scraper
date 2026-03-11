@@ -23,16 +23,17 @@ type ArticleSummary struct {
 
 // FeedStatus represents the health and extraction count for a specific feed source.
 type FeedStatus struct {
-	Name            string `json:"name"`
-	URL             string `json:"url"`
-	ArticleCount    int    `json:"article_count"`    // total fetched this run
-	NewCount        int    `json:"new_count"`        // brand new to the system
-	CachedCount     int    `json:"cached_count"`     // already existed in clusters
-	TotalDiscovered int    `json:"total_discovered"` // total history
-	TotalCompressed int    `json:"total_compressed"` // articles with summary
-	RecentCount     int    `json:"recent_count"`     // fetched in last 24h
-	SkippedCount    int    `json:"skipped_count"`    // failed to scrape
-	Error           string `json:"error,omitempty"`
+	Name            string         `json:"name"`
+	URL             string         `json:"url"`
+	ArticleCount    int            `json:"article_count"`    // total fetched this run
+	NewCount        int            `json:"new_count"`        // brand new to the system
+	CachedCount     int            `json:"cached_count"`     // already existed in clusters
+	TotalDiscovered int            `json:"total_discovered"` // total history
+	TotalCompressed int            `json:"total_compressed"` // articles with summary
+	RecentCount     int            `json:"recent_count"`     // fetched in last 24h
+	SkippedCount    int            `json:"skipped_count"`    // failed to scrape
+	SourceBreakdown map[string]int `json:"source_breakdown,omitempty"`
+	Error           string         `json:"error,omitempty"`
 }
 
 // FetchFeeds grabs the latest items from all provided feeds concurrently.

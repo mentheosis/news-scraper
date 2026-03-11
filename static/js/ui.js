@@ -169,6 +169,18 @@ export function renderFeedHealth(stats) {
                 <strong style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.name}</strong>
             </div>
             ${statsHtml}
+            ${item.source_breakdown ? `
+                <div style="margin-top: 8px; font-size: 10px; border-top: 1px dashed var(--border-color); padding-top: 6px;">
+                    <div style="opacity: 0.6; margin-bottom: 4px;">Domain Breakdown:</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                        ${Object.entries(item.source_breakdown).sort((a, b) => b[1] - a[1]).map(([domain, count]) => `
+                            <span style="background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1)">
+                                ${domain}: <strong>${count}</strong>
+                            </span>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
             ${runInfo}
         `;
         list.appendChild(li);

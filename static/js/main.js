@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         activeView = viewName === 'news-feed' ? 'news' : 'graph';
 
         if (viewName === 'news-feed') {
+            fetchDates(); // Populate the dropdown
             initNewsFeedEvents();
             if (state.allTopics && state.allTopics.length > 0) {
                 renderTopics(state.allTopics);
@@ -65,7 +66,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await viewLoader.load('news-feed');
 
     // Fetch topics/dates after view is loaded
-    fetchDates();
+    // Fetch topics after initial view loads
     fetchTopics(false, getLocalYYYYMMDD());
 
     // Global Modal Listener
@@ -109,6 +110,10 @@ function initNewsFeedEvents() {
     document.getElementById('collapse-topics-btn')?.addEventListener('click', () => toggleSidebar('sidebar', 'btn-show-topics'));
     document.getElementById('collapse-headers-btn')?.addEventListener('click', () => toggleSidebar('headers-sidebar', 'btn-show-headers'));
     document.getElementById('collapse-health-btn')?.addEventListener('click', () => toggleSidebar('secondary-sidebar', 'btn-show-health'));
+
+    document.getElementById('news-date-select')?.addEventListener('change', (e) => {
+        fetchTopics(false, e.target.value);
+    });
 
     document.getElementById('refresh-btn')?.addEventListener('click', () => {
         const dateSelect = document.getElementById('news-date-select');
