@@ -512,3 +512,77 @@ func (app *AppState) HandleGenerateDigest(w http.ResponseWriter, r *http.Request
 	data, _ := json.Marshal(response)
 	fmt.Fprintf(w, "event: result\ndata: %s\n\n", data)
 }
+
+// HandleGetGraph returns the persisted graph data.
+func (app *AppState) HandleGetGraph(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	data, err := services.LoadGraph()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+// HandleSaveGraph persists the graph data.
+func (app *AppState) HandleSaveGraph(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data services.GraphData
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := services.SaveGraph(data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+}
+
+// HandleNodeResearch uses Gemini to do a deep dive on a specific node label.
+func (app *AppState) HandleNodeResearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Label string `json:"label"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Label == "" {
+		http.Error(w, "label is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := context.Background()
+	prompt := fmt.Sprintf("Provide a deep-dive research summary (around 300 words) about the following topic: %s. Focus on current context, key players, and broader significance.", body.Label)
+
+	// Re-using the prompt logic via Gemini service
+	client, err := services.GetGeminiClient(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	resp, err := services.GenerateContent(ctx, client, prompt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"research": resp})
+}

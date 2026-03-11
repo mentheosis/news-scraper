@@ -14,6 +14,30 @@ import (
 	"google.golang.org/genai"
 )
 
+func GetGeminiClient(ctx context.Context) (*genai.Client, error) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is not set")
+	}
+
+	return genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey: apiKey,
+	})
+}
+
+func GenerateContent(ctx context.Context, client *genai.Client, prompt string) (string, error) {
+	resp, err := client.Models.GenerateContent(ctx, "gemini-2.0-flash", genai.Text(prompt), nil)
+	if err != nil {
+		return "", err
+	}
+
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("no response generated")
+	}
+
+	return resp.Candidates[0].Content.Parts[0].Text, nil
+}
+
 func getDigestCacheDir() string {
 	dir := filepath.Join(".", ".cache", "digests")
 	os.MkdirAll(dir, 0755)
